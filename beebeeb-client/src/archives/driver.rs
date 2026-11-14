@@ -212,7 +212,7 @@ impl Driver {
 
     /// Read the upload queue's states for this run's uploads again.
     fn reconcile(&mut self) {
-        let Ok(list) = self.inner.uploads.list() else {
+        let Ok(list) = self.inner.uploads.list_inner() else {
             return;
         };
         for summary in list {
@@ -336,7 +336,7 @@ impl Driver {
         if let Some(limit) = self.options.upload_disk_limit {
             request.disk_limit = limit;
         }
-        let queued = transfer_now_ms().and_then(|now| self.inner.uploads.enqueue(request, now));
+        let queued = transfer_now_ms().and_then(|now| self.inner.uploads.enqueue_inner(request, now));
         match queued {
             Ok(id) => {
                 self.uploading.insert(id, staged);
@@ -361,7 +361,7 @@ impl Driver {
         let states: HashMap<i64, TransferState> = self
             .inner
             .uploads
-            .list()
+            .list_inner()
             .map(|list| list.into_iter().map(|s| (s.id, s.state)).collect())
             .unwrap_or_default();
         for id in pending {

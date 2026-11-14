@@ -19,6 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Core applies the screen lock itself. While `ScreenLocked`, every `beebeeb-client` call a person
+  drives answers the new `ClientError::ScreenLocked` before anything is sent (`session_key`, the file,
+  sharing, account, device and settings calls, the download, thumbnail and archive reads); unlock,
+  lock vault and sign out pass, and a device sign-out there removes this device only. Sync, transfers
+  and backup keep running and answer `ClientError::VaultClosed` on a closed vault. New:
+  `flows::{Call, CallRefused, call_may_run}`, `Client::check_call`, and four `LockedAction` variants
+  (`ViewFiles`, `ShareFiles`, `ApproveDevice`, `UseKey`). A host that never starts the lock through core
+  is refused nothing. `UploadService::enqueue` is a person's call; a host's sync queues with the new
+  `UploadService::enqueue_work`. `change_password` answers `ClientError::VaultClosed` on a closed vault.
+  The UniFFI error map reports `VaultClosed` as `SessionExpired`.
+- A password change and the strong installs (`unlock_known_device`, `install_new_device`,
+  `install_recovered_session`) install only for the session they proved: a vault lock or a sign-out
+  that lands after their credentials were set (for a recovery: after its install began) wins and the
+  call answers `StaleAccount`.
+- After an accepted online password check the screen lock's record is always made again; a password
+  counter that changed at the server deletes the record and keeps the wrong-try count.
 - `Session::load_for_user` answers the new `SecretError::VaultClosed` while a vault is closed, and
   `Client::set_session` the new `ClientError::VaultClosed`. A device that never locked a vault and has
   the start setting off is unaffected. `opaque_protocol::client_login_finish_judged` tells a wrong

@@ -95,6 +95,7 @@ impl Client {
         engine: &mut SyncEngine,
         limit: u16,
     ) -> Result<(), SyncLoopError> {
+        self.work_call()?;
         if limit == 0 {
             return Err(SyncLoopError::InvalidAnswer);
         }
@@ -138,6 +139,7 @@ impl Client {
     /// Fetch a snapshot and apply deletion authority only when the server
     /// explicitly marks it complete at known cursors.
     pub async fn refresh_sync_snapshot(&self, session: &Session, engine: &mut SyncEngine) -> Result<(), SyncLoopError> {
+        self.work_call()?;
         let answer = self.execute(&beebeeb_api::proposed::complete_snapshot(), &()).await?;
         let nodes = open_snapshot_nodes(session, engine, &answer)?;
         if answer.complete == Some(true) {
@@ -159,6 +161,7 @@ impl Client {
         engine: &mut SyncEngine,
         catch_up_limit: u16,
     ) -> Result<(), SyncLoopError> {
+        self.work_call()?;
         self.refresh_sync_snapshot(session, engine).await?;
         self.catch_up_sync(session, engine, catch_up_limit).await
     }
@@ -171,6 +174,7 @@ impl Client {
         engine: &mut SyncEngine,
         catch_up_limit: u16,
     ) -> Result<bool, SyncLoopError> {
+        self.work_call()?;
         self.foreground_sync_with_timeout(session, engine, catch_up_limit, Duration::from_secs(35))
             .await
     }
@@ -182,6 +186,7 @@ impl Client {
         catch_up_limit: u16,
         timeout: Duration,
     ) -> Result<bool, SyncLoopError> {
+        self.work_call()?;
         let token: api::StreamToken = self.execute(&api::stream_token(), &()).await?;
         let batch = tokio::time::timeout(
             timeout,

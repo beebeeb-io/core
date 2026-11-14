@@ -10,7 +10,8 @@ use std::time::Duration;
     all(feature = "store", any(feature = "downloads", feature = "thumbnails"))
 ))]
 use beebeeb_api::RawEndpoint;
-use beebeeb_api::flows::{LockFlow, LockState, StartFacts};
+pub use beebeeb_api::flows::{Call, LockedAction};
+use beebeeb_api::flows::{CallRefused, LockFlow, LockState, StartFacts, call_may_run};
 use beebeeb_api::{ApiError, ClientIdentity, Endpoint, RequestBuilder};
 use beebeeb_core::kdf::MasterKey;
 use serde::{Serialize, de::DeserializeOwned};
@@ -105,8 +106,14 @@ pub struct Client {
     transport: Arc<dyn Transport>,
     authentication: Mutex<Option<Authentication>>,
     generation: AtomicU64,
+    /// How often this process signed out: of the app, and of the whole device. An install
+    /// that was refused reads them to learn whether a sign-out is what overtook it.
+    sign_outs: AtomicU64,
+    device_sign_outs: AtomicU64,
     events: EngineEvents,
-    /// The two-level lock of this app process. Never locked together with `authentication`.
+    /// The two-level lock of this app process. Taken alone, or after `authentication` by the
+    /// steps that change the session and the lock as one ([`Client::with_session`]); never
+    /// before it.
     lock: Mutex<LockFlow>,
     /// One password check of the lock at a time: its wrong-try count is read, written and
     /// restored around requests, and two overlapping tries would share one count.
@@ -132,6 +139,10 @@ pub enum ClientError {
     /// The vault is closed: only the strong unlock installs a session.
     #[error("the vault is closed until the account password is proven")]
     VaultClosed,
+    /// The screen is locked: core refuses every call a person drives except unlock, lock the
+    /// vault and sign out (`beebeeb_api::flows::call_may_run`). Nothing was sent.
+    #[error("the app is locked on this device")]
+    ScreenLocked,
     #[error(transparent)]
     Transport(#[from] TransportError),
     #[error(transparent)]
@@ -158,6 +169,8 @@ impl Client {
             transport,
             authentication: Mutex::new(None),
             generation: AtomicU64::new(0),
+            sign_outs: AtomicU64::new(0),
+            device_sign_outs: AtomicU64::new(0),
             lock: Mutex::new(LockFlow::at_start(StartFacts {
                 session_stored: false,
                 ask_password_at_start: Some(false),
@@ -202,13 +215,24 @@ impl Client {
         token: impl Into<String>,
         expected_user: impl Into<String>,
     ) -> Result<u64, ClientError> {
+        self.set_authentication_reading_lock(token, expected_user)
+            .map(|(generation, _)| generation)
+    }
+
+    /// [`Self::set_authentication`], with the lock as it was just before these credentials
+    /// closed it: read in the same step, so nothing lands between the read and the close.
+    pub(crate) fn set_authentication_reading_lock(
+        &self,
+        token: impl Into<String>,
+        expected_user: impl Into<String>,
+    ) -> Result<(u64, LockFlow), ClientError> {
         let token = token.into();
         let expected_user = expected_user.into();
         if token.is_empty() || expected_user.is_empty() {
             return Err(ClientError::InvalidAuthentication);
         }
-        let generation = {
-            let mut authentication = self.authentication.lock().map_err(|_| ClientError::State)?;
+        self.with_session(|authentication, flow| {
+            let before = flow.clone();
             let generation = self.advance_generation();
             *authentication = Some(Authentication {
                 token: Zeroizing::new(token),
@@ -216,13 +240,24 @@ impl Client {
                 master_key: None,
                 generation,
             });
-            generation
-        };
-        // These credentials carry no key and may belong to another account: an app that held
-        // the key no longer does, so its lock state must not keep describing the old session.
-        // A strong install that follows opens it again; nothing weaker does.
-        self.with_lock_flow(LockFlow::session_ended)?;
-        Ok(generation)
+            // These credentials carry no key and may belong to another account: an app that
+            // held the key no longer does, so its lock state must not keep describing the old
+            // session. A strong install that follows opens it again; nothing weaker does.
+            flow.session_ended();
+            (generation, before)
+        })
+    }
+
+    /// One step over the session and the lock together. Every step that drops, replaces or
+    /// installs the session moves the generation and the lock inside it, so the three never
+    /// disagree for another thread: a generation read under the session mutex is the session's.
+    fn with_session<R>(
+        &self,
+        step: impl FnOnce(&mut Option<Authentication>, &mut LockFlow) -> R,
+    ) -> Result<R, ClientError> {
+        let mut authentication = self.authentication.lock().map_err(|_| ClientError::State)?;
+        let mut flow = self.lock.lock().map_err(|_| ClientError::State)?;
+        Ok(step(&mut authentication, &mut flow))
     }
 
     /// The lock state of this app process. A host that installs sessions itself with
@@ -233,6 +268,29 @@ impl Client {
             .lock()
             .map(|flow| flow.state())
             .unwrap_or(LockState::VaultClosed)
+    }
+
+    /// Asks the two-level lock whether a call may run now. Core asks it itself at the start
+    /// of every call it gates (the list is in `docs/agent-notes.md`, "What the screen lock
+    /// refuses"); a host asks it for the paths core cannot see, such as a read of the local
+    /// store that would show a name. The screen lock answers `ScreenLocked` to what a person
+    /// drives, a closed vault answers `VaultClosed` to the work.
+    pub fn check_call(&self, call: Call) -> Result<(), ClientError> {
+        call_may_run(self.lock_state(), call).map_err(|refused| match refused {
+            CallRefused::ScreenLocked => ClientError::ScreenLocked,
+            CallRefused::VaultClosed => ClientError::VaultClosed,
+        })
+    }
+
+    /// The gate of a call a person drives. Asked once, where the call enters core: a call
+    /// that was let in finishes when the screen locks under it.
+    pub(crate) fn person_call(&self, action: LockedAction) -> Result<(), ClientError> {
+        self.check_call(Call::Person(action))
+    }
+
+    /// The gate of the work: it runs while the screen is locked, and not on a closed vault.
+    pub(crate) fn work_call(&self) -> Result<(), ClientError> {
+        self.check_call(Call::Work)
     }
 
     pub(crate) fn lock_password_path(&self) -> bool {
@@ -246,6 +304,10 @@ impl Client {
 
     /// Installs a restored session. Refused while the vault is closed: a closed vault is
     /// opened only by the strong unlock (`unlock_known_device`), never by a restore.
+    ///
+    /// A host that uses the two-level lock does not call this at start (nor
+    /// `Session::load_for_user` before it): it starts with `start_from_store`, which applies
+    /// the "ask for my password at start" setting. This pair does not read that setting.
     pub fn set_session(&self, session: &Session) -> Result<u64, ClientError> {
         if self.lock_state() == LockState::VaultClosed {
             return Err(ClientError::VaultClosed);
@@ -255,6 +317,10 @@ impl Client {
 
     pub(crate) fn install_session(&self, session: &Session) -> Result<u64, ClientError> {
         let mut authentication = self.authentication.lock().map_err(|_| ClientError::State)?;
+        Ok(self.put_session(&mut authentication, session))
+    }
+
+    fn put_session(&self, authentication: &mut Option<Authentication>, session: &Session) -> u64 {
         let generation = self.advance_generation();
         let key_bytes = Zeroizing::new(*session.master_key().to_bytes());
         *authentication = Some(Authentication {
@@ -263,10 +329,41 @@ impl Client {
             master_key: Some(MasterKey::from_bytes(*key_bytes)),
             generation,
         });
-        Ok(generation)
+        generation
     }
 
+    /// Installs `session` only while the account generation is still `expected`, and moves
+    /// the lock with `opened` in the same step. Anything that landed since `expected` was
+    /// read (a vault lock, a sign-out, an ended session, another sign-in) advanced the
+    /// generation under the same mutex, so it wins: nothing is installed, the lock is not
+    /// touched, and the answer is `StaleAccount`.
+    #[cfg(feature = "auth")]
+    pub(crate) fn install_session_at(
+        &self,
+        session: &Session,
+        expected: u64,
+        opened: impl FnOnce(&mut LockFlow),
+    ) -> Result<u64, ClientError> {
+        self.with_session(|authentication, flow| {
+            if self.generation() != expected {
+                return Err(ClientError::StaleAccount);
+            }
+            let generation = self.put_session(authentication, session);
+            opened(flow);
+            Ok(generation)
+        })?
+    }
+
+    /// A copy of the installed account key for a host. Refused while the screen is locked
+    /// (`ScreenLocked`): the key stays in core, and core's own work keeps using it.
     pub fn session_key(&self) -> Result<SessionKey, ClientError> {
+        self.person_call(LockedAction::UseKey)?;
+        self.held_key()
+    }
+
+    /// The installed account key for core's own calls and work: whatever let the caller in
+    /// has already asked the lock.
+    pub(crate) fn held_key(&self) -> Result<SessionKey, ClientError> {
         let authentication = self.authentication.lock().map_err(|_| ClientError::State)?;
         let authentication = authentication.as_ref().ok_or(ClientError::InvalidAuthentication)?;
         if authentication.generation != self.generation() {
@@ -321,38 +418,74 @@ impl Client {
     /// with a closed vault: the stored session is still there, and only the strong unlock
     /// loads its key again. A sign-out follows with [`Self::sign_out_authentication`].
     pub(crate) fn clear_authentication(&self) -> Result<u64, ClientError> {
-        *self.authentication.lock().map_err(|_| ClientError::State)? = None;
-        let generation = self.advance_generation();
-        self.with_lock_flow(LockFlow::session_ended)?;
-        self.events.emit(EngineEvent::WorkStopped);
-        Ok(generation)
+        self.drop_session(LockFlow::session_ended)
     }
 
     /// [`Self::clear_authentication`] for a sign-out: the app is signed out, not closed.
     pub(crate) fn sign_out_authentication(&self) -> Result<u64, ClientError> {
-        let generation = self.clear_authentication();
-        self.with_lock_flow(LockFlow::signed_out)?;
+        let generation = self.drop_session(|flow| {
+            self.sign_outs.fetch_add(1, Ordering::AcqRel);
+            flow.signed_out();
+        });
+        if generation.is_err() {
+            // The session state is unusable; the lock still leaves the account.
+            self.with_lock_flow(LockFlow::signed_out)?;
+        }
         generation
     }
 
-    /// Takes the session out of this process for a vault lock: the key is wiped here, the
-    /// generation advances (every key copy handed out is stale and wiped when its holder
-    /// drops it), work stops. Returns the new generation and the retired token with its
-    /// account, which the caller may use for one request only: ending that session at the
-    /// server ([`Self::end_retired_session`]).
+    /// [`Self::sign_out_authentication`] for a sign-out of the whole device: the stored
+    /// session, the key entry included, goes with it.
+    pub(crate) fn sign_out_device_authentication(&self) -> Result<u64, ClientError> {
+        self.device_sign_outs.fetch_add(1, Ordering::AcqRel);
+        self.sign_out_authentication()
+    }
+
+    /// The sign-outs of this process so far: (all, of the whole device).
     #[cfg(feature = "auth")]
-    pub(crate) fn drop_key_for_vault_lock(&self) -> Result<(u64, Option<RetiredSession>), ClientError> {
-        let taken = self.authentication.lock().map_err(|_| ClientError::State)?.take();
-        let retired = taken.map(|mut authentication| {
-            authentication.master_key = None;
-            RetiredSession {
-                token: std::mem::take(&mut authentication.token),
-                owner: std::mem::take(&mut authentication.expected_user),
-            }
-        });
-        let generation = self.advance_generation();
+    pub(crate) fn sign_outs(&self) -> (u64, u64) {
+        (
+            self.sign_outs.load(Ordering::Acquire),
+            self.device_sign_outs.load(Ordering::Acquire),
+        )
+    }
+
+    fn drop_session(&self, lock: impl FnOnce(&mut LockFlow)) -> Result<u64, ClientError> {
+        let generation = self.with_session(|authentication, flow| {
+            *authentication = None;
+            let generation = self.advance_generation();
+            lock(flow);
+            generation
+        })?;
         self.events.emit(EngineEvent::WorkStopped);
-        Ok((generation, retired))
+        Ok(generation)
+    }
+
+    /// Takes the session out of this process for a vault lock, and closes the lock in the
+    /// same step: the key is wiped here, the generation advances (every key copy handed out
+    /// is stale and wiped when its holder drops it), work stops. Returns the new generation
+    /// and the retired token with its account, which the caller may use for one request only:
+    /// ending that session at the server ([`Self::end_retired_session`]). A signed-out app
+    /// has nothing to close: the refusal is returned and nothing is taken.
+    #[cfg(feature = "auth")]
+    pub(crate) fn drop_key_for_vault_lock(
+        &self,
+    ) -> Result<Result<(u64, Option<RetiredSession>), beebeeb_api::flows::FlowError>, ClientError> {
+        let closed = self.with_session(|authentication, flow| {
+            flow.lock(beebeeb_api::flows::LockLevel::Vault)?;
+            let retired = authentication.take().map(|mut authentication| {
+                authentication.master_key = None;
+                RetiredSession {
+                    token: std::mem::take(&mut authentication.token),
+                    owner: std::mem::take(&mut authentication.expected_user),
+                }
+            });
+            Ok((self.advance_generation(), retired))
+        })?;
+        if closed.is_ok() {
+            self.events.emit(EngineEvent::WorkStopped);
+        }
+        Ok(closed)
     }
 
     /// Ends a session this process no longer uses (a vault lock's, or the one a strong unlock
@@ -377,21 +510,20 @@ impl Client {
     /// host records it with `Client::session_ended` (core's own lock calls do it themselves);
     /// until then a restart starts screen-locked and closes again at the first refusal.
     fn session_expired(&self, generation: u64) {
-        if matches!(self.lock_state(), LockState::Open | LockState::ScreenLocked) {
-            let dropped = self.authentication.lock().is_ok_and(|mut authentication| {
-                let current = authentication
+        let dropped = self.with_session(|authentication, flow| {
+            let current = matches!(flow.state(), LockState::Open | LockState::ScreenLocked)
+                && authentication
                     .as_ref()
                     .is_some_and(|authentication| authentication.generation == generation);
-                if current {
-                    *authentication = None;
-                }
-                current
-            });
-            if dropped {
+            if current {
+                *authentication = None;
                 self.advance_generation();
-                let _ = self.with_lock_flow(LockFlow::session_ended);
-                self.events.emit(EngineEvent::WorkStopped);
+                flow.session_ended();
             }
+            current
+        });
+        if dropped.unwrap_or(false) {
+            self.events.emit(EngineEvent::WorkStopped);
         }
         self.events.emit(EngineEvent::SessionExpired);
     }
@@ -408,6 +540,9 @@ impl Client {
         feature = "auth"
     ))]
     pub(crate) fn stop_account_work(&self) -> u64 {
+        // Under the session mutex, as every other advance: a conditional install never
+        // compares against a generation that is about to move.
+        let _session = self.authentication.lock();
         let generation = self.advance_generation();
         self.events.emit(EngineEvent::WorkStopped);
         generation

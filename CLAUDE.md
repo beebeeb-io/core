@@ -190,7 +190,17 @@ Secrets, input and bindings:
   reached, and never for turning the start setting off. Every password try is counted before any
   check runs, one check at a time; a count that cannot be written refuses the try; only a judged
   wrong password keeps its count (`client_login_finish_judged`, never `client_login_finish`). The lock entries are removed at both
-  purge places in `session.rs`.
+  purge places in `session.rs`. An install is for the session it proved: a password change and every
+  strong install go through `Client::install_session_at` (the expected account generation, under the
+  session mutex, the lock moved in the same step), never `install_session`; a vault lock or a sign-out
+  that landed meanwhile wins, and every step that drops or replaces the session advances the generation
+  and moves the lock inside one hold of that mutex (`with_session`). A stored record's counter never
+  keeps a record. Core applies the screen lock itself: a public call a person drives starts with
+  `person_call` (refused as `ClientError::ScreenLocked` before anything is sent; only unlock, lock
+  vault and sign out pass, and a sign-out there removes this device only), the work starts with
+  `work_call` (refused on a closed vault), and a public entry point never reaches an ungated twin
+  (`*_inner`, `held_key`) without asking; the list is in `docs/agent-notes.md`, "What the screen lock
+  refuses", and `tests_svc_auth/lock_gate.rs` walks the sources for it.
 
 Transfers:
 

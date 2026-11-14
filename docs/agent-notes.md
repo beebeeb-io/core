@@ -499,7 +499,9 @@ check record and wrong-try rule `beebeeb_core::screen_lock`, and the service on 
   limit, a 401 on a live session, no record offline, an account on the legacy stretch, a finish that
   could not run, any other error. An ended session deletes it with the record. A stored count that
   does not parse becomes the longest wait, written once. After an accepted online proof the record is
-  made again unless the stored one already carries the counter the server named. Only a transport failure is "the server
+  always made again from the accepted password: a stored record's counter is not authenticated and is
+  never a reason to keep it. A password counter that changed at the server (`refresh_lock_from_server`)
+  deletes the record and keeps the count. Only a transport failure is "the server
   cannot be reached"; an answer without a judgement (a missing route, an outage page) never falls back
   to the record.
 - **An ended session.** A 401 to the session's credentials drops the key in the same call when the app
@@ -516,9 +518,26 @@ check record and wrong-try rule `beebeeb_core::screen_lock`, and the service on 
   fresh boot): a host that turns the setting on starts with `start_from_store` and nothing else.
 - **Strong installs.** `unlock_known_device`, `install_new_device` and `install_recovered_session`
   all clear the mark, drop or replace the check record, reset the count and open the flow, in the
-  step that saves the session. Each install checks that the session it proved is still the one in the
-  process (`proven_at`): a lock or another sign-in that landed while its requests were on their way is
-  not undone by it. A password change restores the lock state it started in.
+  step that saves the session (`strong_install`).
+- **An install is for the session it proved, to the last step.** A password change and every strong
+  install remember the account generation their credentials were set at (a recovery: the one it
+  starts at) and install with `Client::install_session_at`: under the session mutex, only while the
+  generation is still that one, and the lock moves in the same step. Whatever landed since (a vault
+  lock, a sign-out, an ended session, another sign-in) wins: no key is installed, the lock is not
+  opened, the answer is `StaleAccount`, and the credentials in the process are left alone (they are
+  not this call's). A password change puts back the lock state it started in only when its install
+  happened. Every step that drops, replaces or installs the session advances the generation and moves
+  the lock inside one hold of the session mutex (`Client::with_session`; the lock's mutex is taken
+  after the session's, never before), so the three never disagree for another thread.
+- **The store follows the later call.** The install's store writes are not under that mutex, so each
+  side repairs what the other may have overwritten: a refused strong install writes the closed mark
+  again (it cleared it a step earlier); `lock_vault` reads its mark back after the key drop and writes
+  it again when a strong install that finished just before cleared it; a refused install reads the
+  process's sign-out counts (`Client::sign_outs`, taken before its first store write) and, when a
+  sign-out is what overtook it, removes what it wrote (the app's token after an app sign-out, the whole
+  stored session with the key and lock entries after a sign-out of the whole device), and every
+  sign-out leaves the process first and the store second. A password change deletes the old check record before its install,
+  whatever becomes of the install: the server has already changed the password.
 - **Credentials without a key** (`set_authentication`: a password accepted for a sign-in, a passkey or
   device-link step) replace the session of an app that held the key, so they close it (`VaultClosed`);
   the strong install that follows opens it again.
@@ -532,6 +551,14 @@ check record and wrong-try rule `beebeeb_core::screen_lock`, and the service on 
   `set_ask_password_at_start` answer `PasswordCheckUnavailable` (a setting that could be turned on but
   never off would trap a person). The proof's wire shape is in `beebeeb_api::proposed`
   (`password_proof_start`, `password_proof_finish`, `password_proof_codes`) and has one caller.
+- **Core applies the screen lock** (`flows::call_may_run`, `Client::check_call`; the list is the next
+  section). A call asks once, where it enters core: one that was let in finishes when the screen
+  locks under it (a password change does). Core's own callers use the ungated twins (`*_inner`,
+  `held_key`), and three source walks in `tests_svc_auth/lock_gate.rs` fail when a public function of a
+  gated file neither asks nor is listed, when any public entry point reaches an ungated twin without
+  asking, or when core's own code calls a gated call it has a twin for.
+- **A recovery install** is for the account generation it starts at, not the one its recovery was
+  completed at: a host may sign the old account out in between (`prepare_account_replacement`).
 - **Residuals.** On a device that has been offline since a password change elsewhere, the old password
   still opens the screen lock (and only the screen). The counter is read just after the password was
   accepted, not in the same answer: a change that lands in between leaves a record that looks current
@@ -540,3 +567,27 @@ check record and wrong-try rule `beebeeb_core::screen_lock`, and the service on 
 - **Vectors.** `test-vectors/screen_lock.json` is written by `test-vectors/tools/make_screen_lock_vectors.py`
   (argon2-cffi and `cryptography`, not a port of the Rust); `scripts/check-test-vectors.sh` fails on a
   hand edit and proves its own check can go red.
+
+### What the screen lock refuses (`beebeeb-client`)
+
+While `ScreenLocked`, a call a person drives answers `ClientError::ScreenLocked` (inside the service's
+own error where it has one) before anything is sent. A closed vault answers `ClientError::VaultClosed`
+to the work. `SignedOut` is also the state of a host that installs its sessions itself and never
+starts the lock through core: nothing is refused there.
+
+| Class | Calls | `ScreenLocked` | `VaultClosed` |
+|---|---|---|---|
+| The lock's own | `lock_screen`, `unlock_screen_platform_verified`, `unlock_screen_with_password`, `lock_vault`, `session_ended`, `refresh_lock_from_server`, `lock_state`, `check_call` | run | run (each by its own rule) |
+| Sign-out | `sign_out_this_app`, `sign_out_whole_device`, `ServiceCoordinator::sign_out_app` / `sign_out_device` / `prepare_account_replacement`, `UploadService::sign_out` | run; a device sign-out removes **this device only** (the listed entry that carries this device's stored hardware id), any other id is refused, and so is every id when this device has no stored id or its entry carries none: such a device leaves with `sign_out_this_app` | run |
+| Sign-in and strong proofs | `sign_in*`, `submit_two_factor`, the email-code steps, `unlock_known_device`, `install_new_device*`, recovery, signup, `open_with_passkey`, the new device's side of a device link and its PAKE messages, `prove_session_key` | run: a proof stronger than the screen lock; setting its credentials closes the vault | run |
+| A person, files | `session_key`; `list_files`, `list_file_records_page`, `get_file`, `get_file_record`, `file_versions`, `storage_usage`, `create_folder`, `rename_entry`, `move_entry`, `trash_*`, `restore_*`, `delete_*_forever`, `restore_version`, `files::duplicate_file`; `DownloadService::open` / `save_to` / `video_range` / `read_range` / `range_reader` / `read_with`; `ThumbnailService::get`; `ArchiveService::open` / `preview` / `extract` / `open_entry`; `UploadService::list` / `enqueue` | refused | not gated by the lock (no key is held) |
+| A person, sharing | every call of `shares.rs` and the client calls of `contacts.rs` | refused | not gated by the lock |
+| A person, account | `setup_authenticator`, `enable_authenticator`, `remove_authenticator`, `request_account_deletion`, `change_password` (also `VaultClosed` on a closed vault), `change_email`, `create_passkey_copy`, the settings calls of `settings.rs`, `pending_device_links`, `approve_device_link`, `begin_typed_device_approval`, `approve_typed_device_link`, `deny_device_link`, `list_devices`, `remove_device`, `list_account_sessions`, `revoke_account_session`; `set_ask_password_at_start` needs `Open` | refused | not gated by the lock |
+| Work | the five sync calls of `sync.rs`; `UploadService::enqueue_work` (a host's sync of a local change) / `next_transfers`; `ThumbnailService::run_next`; `BackupService::next_batch`; `FileProviderService::fetch_contents` / `create_folder` / `create_file` / `modify` / `delete` / `delete_local` | run | refused |
+| Not gated | constructors, event subscriptions, cancels, cache clears, the queue's pause / resume / bookkeeping, `DownloadService::share_view_download` (account-free) | run | run |
+
+Core cannot see, and the host still refuses while the screen is locked (it may ask `Client::check_call`):
+anything it reads from the local store or renders from memory (`SearchService::query`, the file
+provider's `item` / `children` / `changes_since`, `load_local_settings`, a `Session` or records it
+already holds). The operating system's file manager reaches the sync folder on a locked screen by
+design (contract section 3).

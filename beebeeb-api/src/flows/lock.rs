@@ -135,13 +135,48 @@ pub const fn work_may_run(state: LockState) -> bool {
     matches!(state, LockState::Open | LockState::ScreenLocked)
 }
 
-/// What a host may do while `ScreenLocked`: unlock, lock the vault, and sign out. Everything
+/// What a person may do while `ScreenLocked`: unlock, lock the vault, and sign out. Everything
 /// else is refused, and no file name, account data or thumbnail is shown.
 pub const fn screen_locked_allows(action: LockedAction) -> bool {
     matches!(
         action,
         LockedAction::UnlockScreen | LockedAction::LockVault | LockedAction::SignOut
     )
+}
+
+/// Who drives a call into core.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Call {
+    /// A person, through the app's window: the action it is.
+    Person(LockedAction),
+    /// The work that runs without the window: sync, transfers, backup, thumbnails made for
+    /// the cache, the operating system's file provider.
+    Work,
+}
+
+/// Why the lock refused a call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallRefused {
+    /// The screen is locked and the call is not one of [`screen_locked_allows`].
+    ScreenLocked,
+    /// The vault is closed: work is stopped until the strong unlock.
+    VaultClosed,
+}
+
+/// The lock's answer for one call. The screen lock refuses what a person drives, except
+/// [`screen_locked_allows`], and leaves the work running; a closed vault refuses the work
+/// ([`work_may_run`]). `SignedOut` is also the state of a host that never started the lock
+/// through core and installs its sessions itself: nothing is refused there.
+pub const fn call_may_run(state: LockState, call: Call) -> Result<(), CallRefused> {
+    match (state, call) {
+        (LockState::ScreenLocked, Call::Person(action)) if !screen_locked_allows(action) => {
+            Err(CallRefused::ScreenLocked)
+        }
+        (LockState::Open | LockState::ScreenLocked | LockState::VaultClosed, Call::Work) if !work_may_run(state) => {
+            Err(CallRefused::VaultClosed)
+        }
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -291,9 +326,39 @@ mod tests {
             DeleteAccount,
             UnlockScreen,
             LockVault,
+            ViewFiles,
+            ShareFiles,
+            ApproveDevice,
+            UseKey,
         ];
         let allowed: Vec<_> = all.into_iter().filter(|action| screen_locked_allows(*action)).collect();
         assert_eq!(allowed, [SignOut, UnlockScreen, LockVault]);
+        // The same list is what core lets a person do in each state, and what it lets the
+        // work do: the screen lock stops the person and not the work, a closed vault stops
+        // the work, and a host that never started the lock is refused nothing.
+        for state in ALL {
+            for action in all {
+                let refused = state == LockState::ScreenLocked && !allowed.contains(&action);
+                assert_eq!(
+                    call_may_run(state, Call::Person(action)),
+                    if refused {
+                        Err(CallRefused::ScreenLocked)
+                    } else {
+                        Ok(())
+                    },
+                    "{state:?} {action:?}"
+                );
+            }
+            assert_eq!(
+                call_may_run(state, Call::Work),
+                if state == LockState::VaultClosed {
+                    Err(CallRefused::VaultClosed)
+                } else {
+                    Ok(())
+                },
+                "{state:?}"
+            );
+        }
         // The two new actions belong to the screen lock, not to a locked account.
         assert!(!crate::flows::locked_account_allows(UnlockScreen));
         assert!(!crate::flows::locked_account_allows(LockVault));

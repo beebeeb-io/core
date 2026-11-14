@@ -71,6 +71,11 @@ impl HardwareIdentity {
         Ok(Self { id, secret })
     }
 
+    /// The stored hardware id, without making one.
+    pub(crate) fn stored_id(store: &dyn SecretStore) -> Result<Option<String>, SecretError> {
+        store.get(HARDWARE_ID)?.map(|value| stored_string(&value)).transpose()
+    }
+
     pub(crate) fn id(&self) -> &str {
         &self.id
     }
@@ -380,6 +385,11 @@ impl Session {
     /// Only core's strong unlock (`Client::unlock_known_device`) loads the key of a closed
     /// vault, and it clears the mark. (`Client::start_from_store` sets the mark when it starts
     /// closed because of the start setting, so that setting holds for this path too.)
+    ///
+    /// A host that uses the two-level lock does not call this at start: it starts with
+    /// `Client::start_from_store` and nothing else. This path follows the closed mark, not the
+    /// "ask for my password at start" setting, so on a device whose vault was opened by a
+    /// strong unlock it would load the key at a start the setting says must stay closed.
     pub fn load_for_user(
         store: &dyn SecretStore,
         expected_user: &str,

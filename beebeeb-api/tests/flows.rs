@@ -142,6 +142,10 @@ fn locked_permissions_are_an_allowlist() {
         LockedAction::MutateFiles,
         LockedAction::ChangeSettings,
         LockedAction::DeleteAccount,
+        LockedAction::ViewFiles,
+        LockedAction::ShareFiles,
+        LockedAction::ApproveDevice,
+        LockedAction::UseKey,
     ] {
         assert!(!locked_account_allows(denied));
     }

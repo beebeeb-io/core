@@ -449,7 +449,7 @@ impl BackupService {
         {
             return Ok(checked.clone());
         }
-        let row = match self.client.get_file(&folder.id).await {
+        let row = match self.client.get_file_inner(&folder.id).await {
             Ok(row) => row,
             Err(crate::ClientError::Api(beebeeb_api::ApiError::Server(server)))
                 if matches!(server.status, 403 | 404) =>
@@ -609,6 +609,7 @@ impl BackupService {
         network: NetworkKind,
         now_ms: i64,
     ) -> Result<BackupBatch, BackupError> {
+        self.client.work_call()?;
         let _pass = self.pass_lock.lock().await;
         self.reconcile_upload_outcomes(now_ms).await?;
         // A stopped backup queues nothing and keeps nothing queued, whatever
@@ -698,10 +699,10 @@ impl BackupService {
             )
             .for_backup(&asset.local_identifier);
             request.wifi_only = configuration.wifi_only;
-            let upload_id = self.uploads.enqueue(request, now_ms)?;
+            let upload_id = self.uploads.enqueue_inner(request, now_ms)?;
             let summary = self
                 .uploads
-                .list()?
+                .list_inner()?
                 .into_iter()
                 .find(|item| item.id == upload_id)
                 .ok_or(BackupError::State)?;
@@ -830,7 +831,7 @@ impl BackupService {
         let Some(file_id) = self.manifest.file_id(&asset.local_identifier) else {
             return Ok(());
         };
-        let removed = match self.client.get_file(&file_id).await {
+        let removed = match self.client.get_file_inner(&file_id).await {
             Ok(row) if !row.id.eq_ignore_ascii_case(&file_id) => return Ok(()),
             Ok(row) => row.is_trashed,
             Err(crate::ClientError::Api(beebeeb_api::ApiError::Server(server))) if server.status == 404 => true,

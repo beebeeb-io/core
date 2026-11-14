@@ -108,8 +108,9 @@ impl Client {
     }
 
     /// Closes the vault. In this order: the closed mark is written; the key is dropped from
-    /// this process and the account generation advances, so every key copy handed out is
-    /// refused as stale and wiped when its holder drops it; work stops (`WorkStopped`); the
+    /// this process, the lock closes and the account generation advances in one step, so
+    /// every key copy handed out is refused as stale and wiped when its holder drops it, and
+    /// an install that was on its way installs nothing; work stops (`WorkStopped`); the
     /// session is ended at the server, best effort. The stored session and key stay in the
     /// secret store. If the mark cannot be written the vault is still closed in this process
     /// and [`VaultLocked::survives_restart`] is `false`.
@@ -117,10 +118,15 @@ impl Client {
         if self.lock_state() == LockState::SignedOut {
             return Err(refused("vault lock", FlowError::NotReady));
         }
-        let mark_stored = write_lock_flag(store, LOCK_VAULT_CLOSED, true).is_ok();
-        let (generation, retired) = self.drop_key_for_vault_lock()?;
-        self.with_lock_flow(|flow| flow.lock(LockLevel::Vault))?
+        let mut mark_stored = write_lock_flag(store, LOCK_VAULT_CLOSED, true).is_ok();
+        let (generation, retired) = self
+            .drop_key_for_vault_lock()?
             .map_err(|error| refused("vault lock", error))?;
+        // A strong install that finished just before the key was dropped cleared the mark
+        // after it was written above: the lock is the later of the two, so its mark stands.
+        if read_lock_flag(store, LOCK_VAULT_CLOSED) != Some(true) {
+            mark_stored = write_lock_flag(store, LOCK_VAULT_CLOSED, true).is_ok();
+        }
         if let Some(retired) = retired {
             self.end_session_best_effort(&retired.token, &retired.owner).await;
         }
@@ -196,18 +202,66 @@ impl Client {
         Ok(())
     }
 
-    /// The lock's part of a strong install, in the step that saved the session: the closed
-    /// mark is cleared (here and nowhere else), the check record of the password that was
-    /// just proven replaces any older one, and the wrong-try count is reset.
-    pub(super) fn finish_strong_install(
+    /// A strong install, from the save to the open lock. The install belongs to the session
+    /// that was proven at account generation `proven_at`: anything that landed since (a vault
+    /// lock, a sign-out, an ended session, another sign-in) wins, the key is not installed,
+    /// the lock is not opened, and the answer is `StaleAccount`.
+    ///
+    /// The lock's part is done with the save: the closed mark is cleared (here and nowhere
+    /// else), the check record of the password that was just proven replaces any older one,
+    /// and the wrong-try count is reset. A refused install puts the mark back.
+    pub(super) fn strong_install(
         &self,
+        session: &Session,
         store: &dyn SecretStore,
         record: Option<ScreenCheckRecord>,
+        replace_account: bool,
+        proven_at: u64,
+        save_identity: impl FnOnce() -> Result<(), AuthError>,
     ) -> Result<(), AuthError> {
+        let sign_outs = self.sign_outs();
+        // Nothing is written for a session that is no longer the one in the process.
+        if self.generation() != proven_at {
+            return Err(ClientError::StaleAccount.into());
+        }
+        if replace_account {
+            session.save_replacing(store, self.app_id())?;
+        } else {
+            session.save(store, self.app_id())?;
+        }
+        save_identity()?;
         store.delete(LOCK_VAULT_CLOSED)?;
         replace_screen_check(store, record);
         let _ = store.delete(LOCK_ATTEMPTS);
+        let installed = self.install_session_at(session, proven_at, |flow| {
+            // The strong unlock opens from every state.
+            let _ = flow.known_device_unlocked();
+        });
+        if let Err(error) = installed {
+            // The vault is closed (or the app signed out) by whatever landed: the mark that
+            // was cleared a moment ago is written again, and a sign-out keeps its store.
+            let _ = write_lock_flag(store, LOCK_VAULT_CLOSED, true);
+            self.forget_refused_save(store, sign_outs);
+            return Err(error.into());
+        }
         Ok(())
+    }
+
+    /// After an install that was refused because the session changed: when this process
+    /// signed out since `before` ([`Client::sign_outs`], read before the first store write),
+    /// what this call wrote is removed again, so a sign-out is not undone in the store
+    /// either. A sign-out of the whole device purges the stored session again, the key entry
+    /// and the lock entries included; a sign-out of the app removes the app's token.
+    pub(super) fn forget_refused_save(&self, store: &dyn SecretStore, before: (u64, u64)) {
+        let (all, device) = self.sign_outs();
+        if device != before.1 {
+            // The purge follows the app registry, which the sign-out already emptied: the
+            // token this call wrote goes by name first.
+            let _ = Session::sign_out_app(store, self.app_id());
+            let _ = Session::sign_out_device(store);
+        } else if all != before.0 {
+            let _ = Session::sign_out_app(store, self.app_id());
+        }
     }
 }
 
@@ -220,8 +274,9 @@ pub(super) fn replace_screen_check(store: &dyn SecretStore, record: Option<Scree
     }
 }
 
-/// Deletes the check record (and the wrong-try count) when the server's password counter
-/// differs from the record's, or the record is not one this version reads.
+/// Deletes the check record when the server's password counter differs from the record's,
+/// or the record is not one this version reads. The wrong-try count stays: a password
+/// changed elsewhere does not end a wait that wrong tries on this device earned.
 pub(super) fn reconcile_password_counter(store: &dyn SecretStore, server: Option<u64>) -> Result<(), SecretError> {
     let Some(server) = server else {
         return Ok(());
@@ -231,7 +286,6 @@ pub(super) fn reconcile_password_counter(store: &dyn SecretStore, server: Option
     };
     if ScreenCheckRecord::from_bytes(&bytes).password_counter() != Some(server) {
         store.delete(LOCK_SCREEN_CHECK)?;
-        store.delete(LOCK_ATTEMPTS)?;
     }
     Ok(())
 }

@@ -55,7 +55,8 @@ impl Client {
         file_id: &str,
         options: &LinkOptions,
     ) -> Result<CreatedLink, ShareServiceError> {
-        let session_key = self.session_key()?;
+        self.person_call(crate::LockedAction::ShareFiles)?;
+        let session_key = self.held_key()?;
         let (mut flow, mut request) = {
             let file_key = owned_file_key(session_key.master_key(), file_id)?;
             CreateLink::start(app_url, file_id, session_key.master_key(), &file_key, options)?
@@ -70,18 +71,22 @@ impl Client {
     }
 
     pub async fn my_share_links(&self) -> Result<shares::List, ClientError> {
+        self.person_call(crate::LockedAction::ShareFiles)?;
         self.execute(&shares::mine(), &()).await
     }
 
     pub async fn revoke_share_link(&self, id: &str) -> Result<(), ClientError> {
+        self.person_call(crate::LockedAction::ShareFiles)?;
         self.execute(&shares::revoke(id), &()).await.map(|_| ())
     }
 
     pub async fn incoming_invites(&self) -> Result<invites::List, ClientError> {
+        self.person_call(crate::LockedAction::ShareFiles)?;
         self.execute(&invites::incoming(), &()).await
     }
 
     pub async fn sent_invites(&self) -> Result<invites::List, ClientError> {
+        self.person_call(crate::LockedAction::ShareFiles)?;
         self.execute(&invites::sent(), &()).await
     }
 
@@ -96,7 +101,17 @@ impl Client {
         email: &str,
         peer_key: PeerKeyExpectation,
     ) -> Result<InviteOutcome, ShareServiceError> {
-        let session_key = self.session_key()?;
+        self.person_call(crate::LockedAction::ShareFiles)?;
+        self.create_invite_inner(file_id, email, peer_key).await
+    }
+
+    pub(crate) async fn create_invite_inner(
+        &self,
+        file_id: &str,
+        email: &str,
+        peer_key: PeerKeyExpectation,
+    ) -> Result<InviteOutcome, ShareServiceError> {
+        let session_key = self.held_key()?;
         let (mut flow, mut request) = {
             let file_key = owned_file_key(session_key.master_key(), file_id)?;
             let target = ShareTarget {
@@ -128,12 +143,13 @@ impl Client {
         presented_public_key: &[u8],
         observed_at: i64,
     ) -> Result<InviteOutcome, ShareServiceError> {
+        self.person_call(crate::LockedAction::ShareFiles)?;
         let fingerprint = key_fingerprint(presented_public_key)?;
         let trust = crate::contacts::observe_contact_key(store, contact_id, presented_public_key, observed_at)?;
         if trust == crate::contacts::ContactTrust::KeyChanged {
             return Err(ShareServiceError::ContactKeyChanged);
         }
-        self.create_invite(file_id, email, PeerKeyExpectation::Compared(fingerprint))
+        self.create_invite_inner(file_id, email, PeerKeyExpectation::Compared(fingerprint))
             .await
     }
 
@@ -149,7 +165,8 @@ impl Client {
         recipient_public_key_b64: &str,
         peer_key: PeerKeyExpectation,
     ) -> Result<[u8; 32], ShareServiceError> {
-        let session_key = self.session_key()?;
+        self.person_call(crate::LockedAction::ShareFiles)?;
+        let session_key = self.held_key()?;
         let SealedApproval {
             request,
             recipient_public_key,
@@ -172,6 +189,7 @@ impl Client {
     }
 
     pub async fn deny_invite(&self, id: &str) -> Result<(), ClientError> {
+        self.person_call(crate::LockedAction::ShareFiles)?;
         self.execute(&invites::deny(id), &()).await.map(|_| ())
     }
 
@@ -188,7 +206,8 @@ impl Client {
         input: FolderLinkInput<'_>,
         mut record_custody_seen: impl FnMut(&str) -> Result<(), ShareServiceError>,
     ) -> Result<CreatedFolderLink, ShareServiceError> {
-        let session_key = self.session_key()?;
+        self.person_call(crate::LockedAction::ShareFiles)?;
+        let session_key = self.held_key()?;
         let (mut flow, mut step) = FolderShare::link(input, session_key.master_key())?;
         loop {
             match step {
@@ -210,10 +229,12 @@ impl Client {
     }
 
     pub async fn folder_links(&self, folder_id: Option<&str>) -> Result<folder_links::List, ClientError> {
+        self.person_call(crate::LockedAction::ShareFiles)?;
         self.execute(&folder_links::list(folder_id), &()).await
     }
 
     pub async fn revoke_folder_link(&self, id: &str) -> Result<(), ClientError> {
+        self.person_call(crate::LockedAction::ShareFiles)?;
         self.execute(&folder_links::revoke(id), &()).await.map(|_| ())
     }
 
@@ -221,6 +242,7 @@ impl Client {
         &self,
         mut request: file_requests::Create,
     ) -> Result<file_requests::Created, ClientError> {
+        self.person_call(crate::LockedAction::ShareFiles)?;
         request
             .expires_in_secs
             .get_or_insert(DEFAULT_LINK_EXPIRY_HOURS.saturating_mul(3600));
@@ -228,10 +250,12 @@ impl Client {
     }
 
     pub async fn file_requests(&self) -> Result<file_requests::List, ClientError> {
+        self.person_call(crate::LockedAction::ShareFiles)?;
         self.execute(&file_requests::list(), &()).await
     }
 
     pub async fn close_file_request(&self, id: &str) -> Result<file_requests::FileRequest, ClientError> {
+        self.person_call(crate::LockedAction::ShareFiles)?;
         self.execute(&file_requests::close(id), &()).await
     }
 }

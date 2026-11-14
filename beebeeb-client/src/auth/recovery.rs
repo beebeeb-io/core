@@ -369,7 +369,10 @@ impl Client {
         {
             return Err(AuthError::AnotherAccountOnDevice);
         }
-        let generation = self.generation().checked_add(1).ok_or(AuthError::MalformedAnswer)?;
+        // A recovery sets no credentials of its own before this step: the install is for the
+        // account generation it starts at.
+        let proven_at = self.generation();
+        let generation = proven_at.checked_add(1).ok_or(AuthError::MalformedAnswer)?;
         let session = Session::from_authenticated(
             api_url,
             recovered.session_token.to_string(),
@@ -377,17 +380,9 @@ impl Client {
             master_key,
             generation,
         )?;
-        if replace_account {
-            session.save_replacing(store, self.app_id())?;
-        } else {
-            session.save(store, self.app_id())?;
-        }
         // A recovery is a strong install: it opens a closed vault, and the check record of the
         // password it replaced must not survive it.
-        self.finish_strong_install(store, None)?;
-        self.install_session(&session)?;
-        self.with_lock_flow(beebeeb_api::flows::LockFlow::known_device_unlocked)?
-            .map_err(|error| lock::refused("session installation", error))?;
+        self.strong_install(&session, store, None, replace_account, proven_at, || Ok(()))?;
         Ok(InstalledSession {
             owner: recovered.owner.clone(),
             generation,

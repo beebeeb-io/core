@@ -336,3 +336,152 @@ async fn direct_device_sign_out_treats_an_already_ended_session_as_success() {
         );
     }
 }
+
+/// A screen-locked client over `transport`, the store it started from, and a listing of two
+/// devices: `device-1` carries this device's stored hardware identity, `device-2` another's.
+fn screen_locked_client(transport: &ScriptedTransport) -> (Arc<Client>, Secrets, Vec<u8>) {
+    let secrets = Secrets::default();
+    crate::Session::from_parts_for_test("https://api.example", "token", "user-1", [1; 32], 1)
+        .unwrap()
+        .save(&secrets, "test-app")
+        .unwrap();
+    let own = crate::session::HardwareIdentity::load_or_create(&secrets)
+        .unwrap()
+        .id()
+        .to_owned();
+    let device = |id: &str, hardware_id: &str| {
+        serde_json::json!({
+            "id": id, "hostname": "", "platform": "windows", "last_seen": "2026-11-05T12:00:00Z",
+            "created_at": "2026-11-05T12:00:00Z", "holds_key": true, "hardware_id": hardware_id,
+        })
+    };
+    let listing = serde_json::to_vec(&serde_json::json!({
+        "devices": [device("device-1", &own), device("device-2", "5d0e0b3c-7a52-4f1a-9d2e-1c6f3a8b9e77")],
+    }))
+    .unwrap();
+    let client = Arc::new(Client::new(ClientConfig::for_tests(), Arc::new(transport.clone())).unwrap());
+    assert_eq!(
+        client.start_from_store(&secrets).unwrap(),
+        beebeeb_api::flows::LockState::ScreenLocked
+    );
+    (client, secrets, listing)
+}
+
+fn refused_on_a_locked_screen<T: std::fmt::Debug>(result: Result<T, crate::devices::DeviceError>) {
+    assert!(
+        matches!(
+            result,
+            Err(crate::devices::DeviceError::Client(crate::ClientError::ScreenLocked))
+        ),
+        "{result:?}"
+    );
+}
+
+/// A sign-out is allowed on a locked screen, and it removes this device only: with another
+/// device's id it would be a device removal, which a locked screen refuses.
+#[tokio::test]
+async fn a_screen_locked_device_sign_out_removes_this_device_and_no_other() {
+    let transport = ScriptedTransport::json(200, Vec::new());
+    let (client, secrets, listing) = screen_locked_client(&transport);
+    transport.respond_next_json(200, listing.clone());
+
+    refused_on_a_locked_screen(client.sign_out_whole_device("device-2", true, &secrets).await);
+    assert_eq!(
+        request_lines(&transport),
+        ["Get /api/v1/clients/devices"],
+        "nothing was removed"
+    );
+    assert_eq!(client.lock_state(), beebeeb_api::flows::LockState::ScreenLocked);
+    assert!(client.held_key().is_ok());
+
+    transport.respond_next_json(200, br#"{"message":"logged out"}"#.to_vec());
+    transport.respond_next_json(204, Vec::new());
+    transport.respond_next_json(200, listing);
+    client.sign_out_whole_device("device-1", true, &secrets).await.unwrap();
+    assert_eq!(
+        request_lines(&transport)[1..],
+        [
+            "Get /api/v1/clients/devices",
+            "Delete /api/v1/clients/devices/device-1",
+            "Post /api/v1/auth/logout",
+        ]
+    );
+    assert_eq!(client.lock_state(), beebeeb_api::flows::LockState::SignedOut);
+}
+
+#[tokio::test]
+async fn a_screen_locked_coordinated_sign_out_removes_this_device_and_no_other() {
+    let root = tempdir().unwrap();
+    let transport = ScriptedTransport::json(200, Vec::new());
+    let (client, secrets, listing) = screen_locked_client(&transport);
+    let coordinator = sign_out_coordinator(Arc::clone(&client), root.path());
+    assert_eq!(client.lock_state(), beebeeb_api::flows::LockState::ScreenLocked);
+    transport.respond_next_json(200, listing.clone());
+
+    refused_on_a_locked_screen(
+        coordinator
+            .sign_out_device("device-2", true, &secrets, &SuccessfulCanceller, &Purger::default(), 2)
+            .await,
+    );
+    assert_eq!(
+        request_lines(&transport),
+        ["Get /api/v1/clients/devices"],
+        "nothing was removed"
+    );
+    assert_eq!(client.lock_state(), beebeeb_api::flows::LockState::ScreenLocked);
+
+    transport.respond_next_json(200, br#"{"message":"logged out"}"#.to_vec());
+    transport.respond_next_json(204, Vec::new());
+    transport.respond_next_json(200, listing);
+    let report = coordinator
+        .sign_out_device("device-1", true, &secrets, &SuccessfulCanceller, &Purger::default(), 2)
+        .await
+        .unwrap();
+    assert_eq!(report.failures, []);
+    assert_eq!(
+        request_lines(&transport)[1..],
+        [
+            "Get /api/v1/clients/devices",
+            "Delete /api/v1/clients/devices/device-1",
+            "Post /api/v1/auth/logout",
+        ]
+    );
+    assert_eq!(client.lock_state(), beebeeb_api::flows::LockState::SignedOut);
+}
+
+/// Duplicating a file is a change a person drives: refused on a locked screen, nothing read.
+#[tokio::test]
+async fn a_locked_screen_refuses_a_duplicate() {
+    let root = tempdir().unwrap();
+    let transport = ScriptedTransport::json(200, Vec::new());
+    let (client, _secrets, _) = screen_locked_client(&transport);
+    let store = Arc::new(Mutex::new(beebeeb_store::Store::open_in_memory().unwrap()));
+    let downloads = DownloadService::new(
+        Arc::clone(&client),
+        Arc::clone(&store),
+        root.path().join("cache"),
+        1024,
+        beebeeb_types::limits::MemoryBudget::NATIVE,
+    )
+    .unwrap();
+    let uploads = UploadService::new(Arc::clone(&client), store, root.path().join("staging")).unwrap();
+    let source = crate::downloads::DownloadFile {
+        file_id: "file-1".into(),
+        name_encrypted: "sealed".into(),
+        size_bytes: 1,
+        chunk_size_bytes: 1,
+        chunk_count: 1,
+        object_version_id: "v".into(),
+    };
+
+    let refused = crate::files::duplicate_file(&downloads, &uploads, &source, "copy", None, None, 1).await;
+    assert!(
+        matches!(
+            refused,
+            Err(crate::files::FileServiceError::Client(crate::ClientError::ScreenLocked))
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(transport.request_count(), 0);
+    assert!(uploads.list_inner().unwrap().is_empty(), "nothing was queued");
+}

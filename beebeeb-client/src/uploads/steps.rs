@@ -186,7 +186,7 @@ impl UploadService {
         record: &UploadRecord,
         planner: &BackgroundUploadPlanner,
     ) -> Result<String, UploadServiceError> {
-        let session_key = self.client.session_key()?;
+        let session_key = self.client.held_key()?;
         let version = planner.version_commitment().ok_or(UploadServiceError::Encryption)?;
         if record.replacement.is_some() {
             #[allow(deprecated)]
@@ -220,7 +220,7 @@ impl UploadService {
     /// idempotent. An answer naming another file is never taken as done; one
     /// that names none is taken as before.
     async fn complete(&self, record: &UploadRecord, name_encrypted: &str) -> Result<(), UploadServiceError> {
-        let session_key = self.client.session_key()?;
+        let session_key = self.client.held_key()?;
         let request = CompleteRequest {
             name_encrypted: Some(name_encrypted.to_owned()),
             version_metadata_encrypted: Some(name_encrypted.to_owned()),

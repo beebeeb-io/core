@@ -237,6 +237,7 @@ impl ThumbnailService {
     }
 
     pub async fn run_next(&self, network: NetworkKind, now_ms: i64) -> Result<Option<PathBuf>, ThumbnailServiceError> {
+        self.client.work_call()?;
         let lease = now_ms.checked_add(LEASE_MS).ok_or(ThumbnailServiceError::State)?;
         let transfer = self
             .store
@@ -311,6 +312,7 @@ impl ThumbnailService {
         variant: ThumbnailVariant,
         now_ms: i64,
     ) -> Result<PathBuf, ThumbnailServiceError> {
+        self.client.person_call(crate::LockedAction::ViewFiles)?;
         for fallback in fallback_order(variant) {
             let key = cache_key(file_id, *fallback);
             let entry = {
@@ -410,7 +412,7 @@ impl ThumbnailService {
         variant: ThumbnailVariant,
         now_ms: i64,
     ) -> Result<PathBuf, ThumbnailServiceError> {
-        let session_key = self.client.session_key()?;
+        let session_key = self.client.held_key()?;
         let metadata = decrypt_file_metadata(session_key.master_key(), &job.file_id, &job.name_encrypted)
             .map_err(|_| ThumbnailServiceError::Authentication)?;
         let policy = ThumbnailPolicy::for_variant(variant);
@@ -441,7 +443,7 @@ impl ThumbnailService {
         mode: BoundedInsert,
         now_ms: i64,
     ) -> Result<PathBuf, ThumbnailServiceError> {
-        let session_key = self.client.session_key()?;
+        let session_key = self.client.held_key()?;
         let metadata = decrypt_file_metadata(session_key.master_key(), file_id, name_encrypted)
             .map_err(|_| ThumbnailServiceError::Authentication)?;
         let sealed = self

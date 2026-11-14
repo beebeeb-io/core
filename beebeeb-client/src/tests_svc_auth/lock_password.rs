@@ -4,7 +4,7 @@
 //! Every OPAQUE finish, enrolment and local check here is a real canonical Argon2id run.
 
 use beebeeb_api::{Header, flows::LockState};
-use beebeeb_core::screen_lock::ScreenCheckRecord;
+use beebeeb_core::screen_lock::{self, CheckOutcome, ScreenCheckRecord};
 
 use super::lock::*;
 use super::*;
@@ -116,29 +116,27 @@ async fn a_stale_record_never_opens_a_connected_device() {
     assert_ne!(s.record().unwrap(), record_for(OLD_PASSWORD));
 }
 
-/// A record the server's counter says is still this password's is kept as it is; without a
-/// counter from the server nothing says so, and the record is made again.
+/// The record's counter is not authenticated, so it is never a reason to keep a record: a
+/// record that carries the server's counter but was made for another password is replaced by
+/// one for the password the server has just accepted.
 #[tokio::test]
-async fn an_online_unlock_keeps_a_record_at_the_servers_counter_and_renews_any_other() {
-    let s = setup();
-    s.seed_record(PASSWORD);
-    s.server.report_password_counter(0);
-    assert_eq!(s.unlock(PASSWORD, NOW).await.unwrap(), ScreenUnlock::Opened);
-    assert_eq!(
-        s.record().unwrap(),
-        record_for(PASSWORD),
-        "the same counter: kept byte for byte"
-    );
-
-    let s = setup();
-    s.seed_record(PASSWORD);
-    assert_eq!(s.unlock(PASSWORD, NOW).await.unwrap(), ScreenUnlock::Opened);
-    assert_ne!(
-        s.record().unwrap(),
-        record_for(PASSWORD),
-        "no counter named: made again"
-    );
-    assert!(ScreenCheckRecord::from_bytes(&s.record().unwrap()).is_readable());
+async fn an_online_unlock_makes_the_record_again_whatever_its_counter_says() {
+    for counter in [Some(0), None] {
+        let s = setup();
+        // Made for another password, at the counter the server reports.
+        s.seed_record(OLD_PASSWORD);
+        if let Some(counter) = counter {
+            s.server.report_password_counter(counter);
+        }
+        assert_eq!(s.unlock(PASSWORD, NOW).await.unwrap(), ScreenUnlock::Opened);
+        let record = ScreenCheckRecord::from_bytes(&s.record().unwrap());
+        assert!(record.is_readable());
+        assert_eq!(
+            screen_lock::verify(&record, &password(PASSWORD), OWNER).unwrap(),
+            CheckOutcome::Match,
+            "{counter:?}: the record is the accepted password's"
+        );
+    }
 }
 
 /// One check at a time: the count is read, written and restored around requests, so a second
@@ -238,7 +236,7 @@ async fn the_tenth_wrong_try_turns_the_local_check_off_until_the_server_accepts_
     assert_eq!(s.record(), None, "the record is deleted");
     assert_eq!(attempts(s.store.as_ref()), Some((10, NOW)));
     // The lockout removes the offline password path only: the key and the session stay.
-    assert!(s.client.session_key().is_ok());
+    assert!(s.client.held_key().is_ok());
     assert_eq!(s.client.lock_state(), LockState::ScreenLocked);
     // Offline, even the right password opens nothing now, and it is not a wrong try.
     assert_eq!(
@@ -372,7 +370,7 @@ async fn a_401_on_a_live_session_is_the_servers_limit_and_not_a_wrong_try() {
         );
         assert_eq!(attempts(s.store.as_ref()), None, "{leg}");
         assert_eq!(s.client.lock_state(), LockState::ScreenLocked, "{leg}");
-        assert!(s.client.session_key().is_ok(), "{leg}");
+        assert!(s.client.held_key().is_ok(), "{leg}");
         assert_eq!(s.server.count(ME), 1, "core asks whether the session still lives");
         assert_eq!(
             count_of(&drained(&mut events), &EngineEvent::SessionExpired),
@@ -407,7 +405,7 @@ async fn a_401_on_an_ended_session_closes_the_vault_and_is_not_a_wrong_try() {
             "{leg}"
         );
         assert_eq!(s.client.lock_state(), LockState::VaultClosed, "{leg}");
-        assert!(s.client.session_key().is_err(), "{leg}");
+        assert!(s.client.held_key().is_err(), "{leg}");
         assert_eq!(s.record(), None, "the check record is deleted");
         assert_eq!(attempts(s.store.as_ref()), None);
         assert_eq!(

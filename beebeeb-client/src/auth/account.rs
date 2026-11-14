@@ -2,6 +2,7 @@ use super::*;
 
 impl Client {
     pub async fn setup_authenticator(&self) -> Result<AuthenticatorEnrollment, AuthError> {
+        self.person_call(crate::LockedAction::ManageFactors)?;
         let answer = self
             .execute(
                 &beebeeb_api::routes::account::setup_totp(),
@@ -15,6 +16,7 @@ impl Client {
     }
 
     pub async fn enable_authenticator(&self, code: String) -> Result<(), AuthError> {
+        self.person_call(crate::LockedAction::ManageFactors)?;
         self.execute(
             &beebeeb_api::routes::account::enable_totp(),
             &beebeeb_api::routes::account::TotpCode {
@@ -27,6 +29,7 @@ impl Client {
     }
 
     pub async fn remove_authenticator(&self, code: String) -> Result<(), AuthError> {
+        self.person_call(crate::LockedAction::ManageFactors)?;
         self.execute(
             &beebeeb_api::routes::account::disable_totp(),
             &beebeeb_api::routes::account::TotpCode {
@@ -43,6 +46,7 @@ impl Client {
         password: Zeroizing<String>,
         authenticator_code: Option<String>,
     ) -> Result<(), AuthError> {
+        self.person_call(crate::LockedAction::DeleteAccount)?;
         let confirmation = self.confirm_action(&password).await?;
         // The step-up is the password's only use: wipe it before the next request.
         drop(password);
@@ -151,6 +155,11 @@ impl Client {
         new_password: Zeroizing<String>,
         store: &dyn SecretStore,
     ) -> Result<InstalledSession, AuthError> {
+        self.person_call(crate::LockedAction::ChangeSettings)?;
+        // A closed vault holds no key to keep: the change is made from an open app.
+        if self.lock_state() == LockState::VaultClosed {
+            return Err(ClientError::VaultClosed.into());
+        }
         if new_password.is_empty() {
             return Err(AuthError::MalformedAnswer);
         }
@@ -194,18 +203,24 @@ impl Client {
         // The state is read here, not before the requests above: a screen lock that landed
         // while they were on their way stays locked. From here to the install the app is
         // closed, and a closed app cannot be screen-locked or opened by anything weaker.
-        let lock_before = self.with_lock_flow(|flow| flow.clone())?;
-        self.set_authentication(changed.session_token.clone(), changed.user_id.clone())?;
+        // It is read in the step that sets the new credentials, so no lock lands in between.
+        // Everything below belongs to those credentials, at this account generation.
+        let sign_outs = self.sign_outs();
+        let (changed_at, lock_before) =
+            self.set_authentication_reading_lock(changed.session_token.clone(), changed.user_id.clone())?;
         let _ = key_state;
         if let Err(error) = self.prove_session_key(stored.master_key()).await {
-            let _ = self.clear_authentication();
+            if !matches!(error, AuthError::Client(ClientError::StaleAccount)) {
+                let _ = self.clear_authentication();
+            }
             return Err(error);
         }
-        let generation = self.generation().checked_add(1).ok_or(AuthError::MalformedAnswer)?;
+        let generation = changed_at.checked_add(1).ok_or(AuthError::MalformedAnswer)?;
         let refreshed = stored.refresh(changed.session_token, generation)?;
-        refreshed.save(store, self.app_id())?;
-        // The old password's check record must not outlive the change. With the password path
-        // on, the new password (the server has just accepted it) gets a record of its own.
+        // The old password's check record must not outlive the change, whatever becomes of
+        // the install: the server has already changed the password. With the password path
+        // on, the new password gets a record of its own. The key stretch (about a second)
+        // runs here, before anything of the new session is written.
         let record = self
             .lock_password_path()
             .then(|| {
@@ -218,14 +233,24 @@ impl Client {
             })
             .flatten();
         lock::replace_screen_check(store, record);
-        self.install_session(&refreshed)?;
-        if beebeeb_api::flows::key_may_be_loaded(lock_before.state()) {
-            self.with_lock_flow(|flow| {
-                // Only what this call closed is put back; a state someone else set stays.
-                if flow.state() == LockState::VaultClosed {
-                    *flow = lock_before;
-                }
-            })?;
+        // Nothing of the new session is saved for a session that is no longer the one in the
+        // process: a vault lock, a sign-out or an ended session that landed meanwhile wins.
+        if self.generation() != changed_at {
+            self.forget_refused_save(store, sign_outs);
+            return Err(ClientError::StaleAccount.into());
+        }
+        refreshed.save(store, self.app_id())?;
+        // The install and the lock state move in one step, and only for the session this
+        // call proved: a lock that landed after the last answer is not undone, the key is
+        // not installed again and the lock is not opened.
+        let installed = self.install_session_at(&refreshed, changed_at, |flow| {
+            if beebeeb_api::flows::key_may_be_loaded(lock_before.state()) {
+                *flow = lock_before;
+            }
+        });
+        if let Err(error) = installed {
+            self.forget_refused_save(store, sign_outs);
+            return Err(error.into());
         }
         Ok(InstalledSession {
             owner: changed.user_id,
@@ -239,6 +264,7 @@ impl Client {
         password: Zeroizing<String>,
         store: &dyn SecretStore,
     ) -> Result<String, AuthError> {
+        self.person_call(crate::LockedAction::ChangeSettings)?;
         let new_email = canonical_email(new_email);
         if new_email.is_empty() || password.is_empty() {
             return Err(AuthError::MalformedAnswer);

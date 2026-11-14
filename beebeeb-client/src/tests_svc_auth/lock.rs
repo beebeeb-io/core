@@ -442,7 +442,7 @@ fn a_start_without_a_stored_session_is_signed_out() {
     let client = Client::new(config(false), LockServer::new()).unwrap();
     assert_eq!(client.lock_state(), LockState::SignedOut);
     assert_eq!(client.start_from_store(&store).unwrap(), LockState::SignedOut);
-    assert!(client.session_key().is_err());
+    assert!(client.held_key().is_err());
     // A session of another app on the device is not this app's.
     session(OWNER, STORED_TOKEN, 1).save(&store, "another-app").unwrap();
     store.reset_reads();
@@ -456,7 +456,7 @@ fn a_start_with_a_stored_session_is_screen_locked_with_the_key_loaded() {
     let client = Client::new(config(false), LockServer::new()).unwrap();
     assert_eq!(client.start_from_store(&store).unwrap(), LockState::ScreenLocked);
     assert_eq!(client.lock_state(), LockState::ScreenLocked);
-    assert!(client.session_key().unwrap().is_current(&client));
+    assert!(client.held_key().unwrap().is_current(&client));
     assert_eq!(client.account_id().unwrap(), OWNER);
     // The lock starts once: a second start cannot re-open or re-lock anything.
     assert!(matches!(
@@ -499,7 +499,7 @@ fn a_closed_or_unreadable_start_reads_the_key_entry_zero_times() {
             "{name}"
         );
         assert_eq!(store.inner.read_count_for(KEY_ENTRY), 0, "{name}");
-        assert!(client.session_key().is_err(), "{name}");
+        assert!(client.held_key().is_err(), "{name}");
         // A start that is closed for any reason is marked closed, so that every restore
         // path stays closed with it (a mark that cannot be read already refuses them).
         if name != "the mark cannot be read" {
@@ -549,7 +549,7 @@ async fn a_locked_vault_stays_closed_across_a_restart_and_keeps_the_stored_sessi
     let restarted = Client::new(config(false), server.clone()).unwrap();
     assert_eq!(restarted.start_from_store(&store).unwrap(), LockState::VaultClosed);
     assert_eq!(store.read_count_for(KEY_ENTRY), 0);
-    assert!(restarted.session_key().is_err());
+    assert!(restarted.held_key().is_err());
 }
 
 #[tokio::test]
@@ -558,7 +558,7 @@ async fn after_a_vault_lock_every_key_copy_is_stale_and_work_has_stopped() {
     let store = store_with_session();
     let client = screen_locked(&server, &store, false);
     client.unlock_screen_platform_verified(&store).unwrap();
-    let copy = client.session_key().unwrap();
+    let copy = client.held_key().unwrap();
     assert!(copy.is_current(&client));
     let mut events = client.events().subscribe();
 
@@ -569,7 +569,7 @@ async fn after_a_vault_lock_every_key_copy_is_stale_and_work_has_stopped() {
         !copy.is_current(&client),
         "a key copy handed out before the lock is stale"
     );
-    assert!(matches!(client.session_key(), Err(ClientError::InvalidAuthentication)));
+    assert!(matches!(client.held_key(), Err(ClientError::InvalidAuthentication)));
     let events = drained(&mut events);
     assert_eq!(count_of(&events, &EngineEvent::WorkStopped), 1);
     assert!(events.contains(&EngineEvent::AccountChanged {
@@ -596,7 +596,7 @@ async fn a_vault_lock_whose_mark_cannot_be_stored_still_closes_this_process() {
         "the caller is told the lock will not survive a restart"
     );
     assert_eq!(client.lock_state(), LockState::VaultClosed);
-    assert!(client.session_key().is_err());
+    assert!(client.held_key().is_err());
     // A signed-out app has no vault to lock.
     let signed_out = Client::new(config(false), server.clone()).unwrap();
     assert!(signed_out.lock_vault(&MemorySecretStore::default()).await.is_err());
@@ -621,7 +621,7 @@ fn the_screen_lock_opens_with_platform_verification_and_locks_again() {
     client.lock_screen().unwrap();
     assert_eq!(client.lock_state(), LockState::ScreenLocked);
     assert_eq!(client.generation(), generation);
-    assert!(client.session_key().unwrap().is_current(&client));
+    assert!(client.held_key().unwrap().is_current(&client));
 }
 
 #[tokio::test]
@@ -638,7 +638,7 @@ async fn an_ended_session_closes_the_vault_and_deletes_the_check_record() {
         client.refresh_lock_from_server(&store).await.unwrap(),
         LockState::VaultClosed
     );
-    assert!(client.session_key().is_err(), "the key is dropped");
+    assert!(client.held_key().is_err(), "the key is dropped");
     assert_eq!(entry(&store, LOCK_SCREEN_CHECK), None);
     assert_eq!(attempts(&store), None);
     assert_eq!(entry(&store, LOCK_VAULT_CLOSED).as_deref(), Some(b"1".as_slice()));
@@ -663,7 +663,7 @@ async fn any_refused_session_drops_the_key_at_once_and_the_host_records_it() {
     // Any request of the app, not a lock call: the arrow is core's.
     assert!(client.execute(&beebeeb_api::routes::auth::me(), &()).await.is_err());
     assert_eq!(client.lock_state(), LockState::VaultClosed);
-    assert!(client.session_key().is_err());
+    assert!(client.held_key().is_err());
     // The host heard `SessionExpired` and records it in the store.
     assert_eq!(client.session_ended(&store).unwrap(), LockState::VaultClosed);
     assert_eq!(entry(&store, LOCK_SCREEN_CHECK), None);
@@ -682,7 +682,7 @@ async fn a_host_that_never_started_the_lock_keeps_its_session_on_a_refusal() {
     server.end_the_session();
     assert!(client.execute(&beebeeb_api::routes::auth::me(), &()).await.is_err());
     assert_eq!(count_of(&drained(&mut events), &EngineEvent::SessionExpired), 1);
-    assert!(client.session_key().is_ok());
+    assert!(client.held_key().is_ok());
     assert_eq!(client.lock_state(), LockState::SignedOut);
 }
 
@@ -735,11 +735,11 @@ async fn an_app_sign_out_leaves_the_lock_signed_out() {
     // Sign-out from the screen lock needs no proof.
     client.sign_out_this_app(&store).await.unwrap();
     assert_eq!(client.lock_state(), LockState::SignedOut);
-    assert!(client.session_key().is_err());
+    assert!(client.held_key().is_err());
     assert_eq!(lock_entries_left(&store), 4);
 }
 
-async fn accepted_password(client: &Client, store: &dyn SecretStore) -> PasswordAccepted {
+pub(super) async fn accepted_password(client: &Client, store: &dyn SecretStore) -> PasswordAccepted {
     match client
         .sign_in_on_device(EMAIL, password(PASSWORD), None, store)
         .await
@@ -779,7 +779,7 @@ async fn the_strong_unlock_opens_a_closed_vault_clears_the_mark_and_ends_the_rep
     let installed = client.unlock_known_device(accepted, &store).await.unwrap();
     assert_eq!(installed.owner(), OWNER);
     assert_eq!(client.lock_state(), LockState::Open);
-    assert!(client.session_key().unwrap().is_current(&client));
+    assert!(client.held_key().unwrap().is_current(&client));
     assert_eq!(
         entry(&store, LOCK_VAULT_CLOSED),
         None,
@@ -806,7 +806,7 @@ async fn a_failed_strong_unlock_leaves_the_vault_closed_and_marked() {
     server.refuse(KEY_PROOF_FINISH, 403, "key_proof_failed");
     assert!(client.unlock_known_device(accepted, &store).await.is_err());
     assert_eq!(client.lock_state(), LockState::VaultClosed);
-    assert!(client.session_key().is_err());
+    assert!(client.held_key().is_err());
     assert_eq!(entry(&store, LOCK_VAULT_CLOSED).as_deref(), Some(b"1".as_slice()));
     assert_eq!(
         entry(&store, "session.token.test-app").unwrap(),
@@ -918,7 +918,7 @@ async fn a_password_change_on_this_device_replaces_the_old_passwords_record() {
             LockState::Open
         };
         assert_eq!(client.lock_state(), expected);
-        assert!(client.session_key().unwrap().is_current(&client));
+        assert!(client.held_key().unwrap().is_current(&client));
         if password_path {
             let record = ScreenCheckRecord::from_bytes(&entry(&store, LOCK_SCREEN_CHECK).unwrap());
             assert_eq!(record.password_counter(), Some(9));
@@ -958,7 +958,11 @@ async fn a_changed_password_counter_deletes_the_record() {
         LockState::ScreenLocked
     );
     assert_eq!(entry(&store, LOCK_SCREEN_CHECK), None);
-    assert_eq!(attempts(&store), None);
+    assert_eq!(
+        attempts(&store),
+        Some((2, 5)),
+        "a password changed elsewhere does not end a wait earned on this device"
+    );
     // A closed vault asks the server nothing.
     client.lock_vault(&store).await.unwrap();
     let asked = server.count(ME);
@@ -987,7 +991,7 @@ async fn an_unrecorded_ended_session_closes_again_at_the_first_contact_after_a_r
         restarted.refresh_lock_from_server(&store).await.unwrap(),
         LockState::VaultClosed
     );
-    assert!(restarted.session_key().is_err());
+    assert!(restarted.held_key().is_err());
     assert_eq!(entry(&store, LOCK_VAULT_CLOSED).as_deref(), Some(b"1".as_slice()));
 }
 
@@ -1060,7 +1064,7 @@ async fn a_strong_unlock_that_cannot_clear_the_mark_installs_nothing() {
     ));
     // The mark is cleared in the step that installs, or the install does not happen.
     assert_eq!(client.lock_state(), LockState::VaultClosed);
-    assert!(client.session_key().is_err());
+    assert!(client.held_key().is_err());
     assert_eq!(entry(&store.inner, LOCK_VAULT_CLOSED).as_deref(), Some(b"1".as_slice()));
 }
 
@@ -1087,7 +1091,7 @@ async fn a_strong_unlock_overtaken_by_another_session_installs_nothing() {
         Err(AuthError::Client(ClientError::StaleAccount))
     ));
     assert_eq!(client.lock_state(), LockState::VaultClosed);
-    assert!(client.session_key().is_err());
+    assert!(client.held_key().is_err());
     assert_eq!(
         entry(store.as_ref(), LOCK_VAULT_CLOSED).as_deref(),
         Some(b"1".as_slice())
@@ -1139,7 +1143,7 @@ async fn a_recovered_session_opens_a_closed_vault_and_drops_the_old_passwords_re
         )
         .unwrap();
     assert_eq!(client.lock_state(), LockState::Open);
-    assert!(client.session_key().unwrap().is_current(&client));
+    assert!(client.held_key().unwrap().is_current(&client));
     assert_eq!(entry(&store, LOCK_VAULT_CLOSED), None);
     assert_eq!(entry(&store, LOCK_SCREEN_CHECK), None);
     assert_eq!(attempts(&store), None);
@@ -1154,10 +1158,10 @@ fn a_host_that_reports_an_ended_session_closes_an_open_app() {
     let store = store_with_session();
     let client = screen_locked(&LockServer::new(), &store, false);
     client.unlock_screen_platform_verified(&store).unwrap();
-    let copy = client.session_key().unwrap();
+    let copy = client.held_key().unwrap();
     assert_eq!(client.session_ended(&store).unwrap(), LockState::VaultClosed);
     assert_eq!(client.lock_state(), LockState::VaultClosed);
-    assert!(client.session_key().is_err());
+    assert!(client.held_key().is_err());
     assert!(!copy.is_current(&client));
     assert_eq!(entry(&store, LOCK_VAULT_CLOSED).as_deref(), Some(b"1".as_slice()));
     // A signed-out app has nothing to close, and nothing is marked for it.
