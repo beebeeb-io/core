@@ -255,6 +255,9 @@ impl Client {
     pub(super) fn forget_refused_save(&self, store: &dyn SecretStore, before: (u64, u64)) {
         let (all, device) = self.sign_outs();
         if device != before.1 {
+            // The purge follows the app registry, which the sign-out already emptied: the
+            // token this call wrote goes by name first.
+            let _ = Session::sign_out_app(store, self.app_id());
             let _ = Session::sign_out_device(store);
         } else if all != before.0 {
             let _ = Session::sign_out_app(store, self.app_id());

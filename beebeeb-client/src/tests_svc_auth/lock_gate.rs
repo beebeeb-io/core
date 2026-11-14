@@ -506,3 +506,44 @@ fn no_public_entry_point_reaches_the_ungated_internals_without_asking_the_lock()
         "public entry points that reach an ungated internal and ask the lock"
     );
 }
+
+/// Core's own code never goes through a gate it has a twin for: a gated call `x` with an
+/// ungated `x_inner` is for the host, and work that called `x` would stop on a locked screen
+/// (a backup pass that read the upload queue through `list` did). Read from every source
+/// file: the calls of each such name, by anything in this crate.
+#[test]
+fn core_calls_the_ungated_twin_never_the_gated_call() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    source_files(&root, &mut files);
+    let sources: Vec<String> = files
+        .iter()
+        .map(|path| std::fs::read_to_string(path).unwrap())
+        .collect();
+    let mut twins: Vec<String> = sources
+        .iter()
+        .flat_map(|source| source.split("fn ").skip(1))
+        .filter_map(|after| after.split('(').next()?.strip_suffix("_inner").map(str::to_owned))
+        .filter(|name| !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_'))
+        .collect();
+    twins.sort();
+    twins.dedup();
+    assert_eq!(twins.len(), 15, "{twins:?}");
+    let called: Vec<(String, usize)> = twins
+        .into_iter()
+        .map(|name| {
+            let call = format!(".{name}(");
+            let count = sources
+                .iter()
+                .flat_map(|source| source.lines())
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .map(|line| line.matches(&call).count())
+                .sum();
+            (name, count)
+        })
+        .filter(|(_, count)| *count > 0)
+        .collect();
+    // `create_folder`: the archive driver's own method of that name. `open`: other types'
+    // (a device link, a range opener, a file). Neither is a gated call of the client.
+    assert_eq!(called, [("create_folder".to_owned(), 2), ("open".to_owned(), 4)]);
+}
