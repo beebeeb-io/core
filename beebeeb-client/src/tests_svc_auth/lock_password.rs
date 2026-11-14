@@ -637,7 +637,10 @@ async fn the_start_setting_turns_on_freely_and_off_only_with_the_server_proven_p
     // A wrong password is counted as the screen lock counts it.
     assert!(matches!(
         off(Some("wrong"), NOW).await,
-        Err(AuthError::PasswordNotConfirmed)
+        Err(AuthError::PasswordWrong {
+            local_check_off: false,
+            ..
+        })
     ));
     assert_eq!(attempts(store), Some((1, NOW)));
     still_on();

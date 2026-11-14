@@ -5,6 +5,7 @@ use beebeeb_api::flows::LockState;
 
 use super::lock::*;
 use super::*;
+use crate::MemorySecretStore;
 use crate::auth::AppLockProof;
 use crate::session::{LOCK_APP_LOCK, LOCK_ASK_AT_START, LOCK_SCREEN_CHECK, LOCK_VAULT_CLOSED};
 
@@ -137,7 +138,10 @@ async fn turning_app_lock_off_needs_a_fresh_screen_proof() {
     // A wrong password is a counted try and writes nothing.
     assert!(matches!(
         set(false, typed("wrong")).await,
-        Err(AuthError::PasswordNotConfirmed)
+        Err(AuthError::PasswordWrong {
+            local_check_off: false,
+            ..
+        })
     ));
     assert_eq!(attempts(store).map(|(failures, _)| failures), Some(1));
     assert_eq!(stored(), None);
@@ -184,4 +188,121 @@ async fn app_lock_off_by_platform_verification_needs_no_password_path() {
         .unwrap();
     assert_eq!(entry(&store, LOCK_APP_LOCK).as_deref(), Some(b"0".as_slice()));
     assert_eq!(server.requests().len(), 0, "no proof route is called");
+}
+
+#[test]
+fn an_interrupted_sign_out_never_leaves_app_lock_off_for_the_next_account() {
+    // The sign-out deletes the app lock entry first: stopped after any one delete, it is gone.
+    for deletes_that_succeed in 1..=3 {
+        let store = CrashingDeleteStore::new(store_with_session(), deletes_that_succeed);
+        store.set(LOCK_APP_LOCK, b"0").unwrap();
+        let _ = Session::sign_out_device(&store);
+        assert_eq!(
+            entry(&store, LOCK_APP_LOCK),
+            None,
+            "after {deletes_that_succeed} delete(s)"
+        );
+    }
+    // And whatever is left behind, the first save of an account clears every lock entry.
+    let store = MemorySecretStore::default();
+    for name in [LOCK_APP_LOCK, LOCK_ASK_AT_START, LOCK_VAULT_CLOSED, LOCK_SCREEN_CHECK] {
+        store.set(name, b"0").unwrap();
+    }
+    session("account-b", "token-b", 1).save(&store, "test-app").unwrap();
+    for name in [LOCK_APP_LOCK, LOCK_ASK_AT_START, LOCK_VAULT_CLOSED, LOCK_SCREEN_CHECK] {
+        assert_eq!(entry(&store, name), None, "{name} survived the first save");
+    }
+    let client = Client::new(config(false), LockServer::new()).unwrap();
+    assert_eq!(client.start_from_store(&store).unwrap(), LockState::ScreenLocked);
+}
+
+/// A store whose deletes stop working after `allowed` of them: a sign-out cut short.
+struct CrashingDeleteStore {
+    inner: MemorySecretStore,
+    allowed: std::sync::atomic::AtomicUsize,
+}
+
+impl CrashingDeleteStore {
+    fn new(inner: MemorySecretStore, allowed: usize) -> Self {
+        Self {
+            inner,
+            allowed: allowed.into(),
+        }
+    }
+}
+
+impl SecretStore for CrashingDeleteStore {
+    fn set(&self, name: &str, value: &[u8]) -> Result<(), SecretError> {
+        self.inner.set(name, value)
+    }
+    fn get(&self, name: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
+        self.inner.get(name)
+    }
+    fn delete(&self, name: &str) -> Result<(), SecretError> {
+        use std::sync::atomic::Ordering::SeqCst;
+        if self.allowed.load(SeqCst) == 0 {
+            return Err(SecretError::Backend);
+        }
+        self.allowed.fetch_sub(1, SeqCst);
+        self.inner.delete(name)
+    }
+}
+
+#[tokio::test]
+async fn a_screen_lock_during_the_proof_wait_stops_app_lock_from_turning_off() {
+    let server = LockServer::new();
+    let store = store_with_session();
+    let client = Arc::new(screen_locked(&server, &store, true));
+    client.unlock_screen_platform_verified(&store).unwrap();
+    let locking = client.clone();
+    server.on_request(move |_| {
+        locking.lock_screen().unwrap();
+    });
+    let result = client
+        .set_app_lock(false, Some(AppLockProof::Password(password(PASSWORD))), &store, NOW)
+        .await;
+    assert!(
+        matches!(
+            result,
+            Err(AuthError::InvalidTransition {
+                step: "app lock",
+                requirement: "the app is open"
+            })
+        ),
+        "{result:?}"
+    );
+    assert_eq!(client.lock_state(), LockState::ScreenLocked);
+    assert_eq!(
+        entry(&store, LOCK_APP_LOCK),
+        None,
+        "nothing written while screen-locked"
+    );
+}
+
+#[tokio::test]
+async fn a_wrong_password_as_the_app_lock_proof_carries_the_wait_and_the_local_check_off() {
+    use beebeeb_core::screen_lock::{LOCAL_CHECK_OFF_AT, wait_after_ms};
+    let server = LockServer::new();
+    let store = store_with_session();
+    let client = screen_locked(&server, &store, true);
+    client.unlock_screen_platform_verified(&store).unwrap();
+    let wrong = |now| client.set_app_lock(false, Some(AppLockProof::Password(password("wrong"))), &store, now);
+    let first = wrong(NOW).await;
+    assert!(
+        matches!(first, Err(AuthError::PasswordWrong { wait_ms, local_check_off: false }) if wait_ms == wait_after_ms(1)),
+        "{first:?}"
+    );
+    seed_attempts(&store, LOCAL_CHECK_OFF_AT - 1, NOW);
+    let tenth = wrong(NOW + wait_after_ms(LOCAL_CHECK_OFF_AT - 1) + 1).await;
+    assert!(
+        matches!(
+            tenth,
+            Err(AuthError::PasswordWrong {
+                local_check_off: true,
+                ..
+            })
+        ),
+        "{tenth:?}"
+    );
+    assert_eq!(entry(&store, LOCK_APP_LOCK), None);
 }

@@ -322,6 +322,11 @@ pub enum AuthError {
     /// Too many wrong tries: no password is checked before the wait is over.
     #[error("too many wrong tries: wait before the next one")]
     PasswordTryWait { wait_ms: u64 },
+    /// A password typed as the proof for a setting was judged wrong (a counted try).
+    /// `wait_ms` is the wait before the next try (0: none yet); `local_check_off` is set when
+    /// this was the tenth wrong try in a row: offline unlock is now off and its record deleted.
+    #[error("the password was wrong")]
+    PasswordWrong { wait_ms: u64, local_check_off: bool },
     /// The server's own limit on password checks. Not a wrong try.
     #[error("the server limits password checks: wait before the next one")]
     PasswordCheckLimited { wait_ms: Option<u64> },

@@ -332,6 +332,11 @@ impl Session {
         let first_save = previous_owner.is_none() && !account_change_started;
         if first_save {
             store.set(ACCOUNT_CHANGE, self.owner.as_bytes())?;
+            // Nothing of a lock setting is carried into an account's first save: a leftover of
+            // an interrupted sign-out (`lock.app_lock = 0` fails open) never reaches it.
+            for name in LOCK_ENTRIES {
+                store.delete(name)?;
+            }
         }
         let account_change = match previous_owner.as_deref() {
             Some(owner) => owner != self.owner,
@@ -572,7 +577,10 @@ fn purge_device_session(store: &dyn SecretStore, extra_app_id: Option<&str>) -> 
         Ok(app_ids) => (app_ids, None),
         Err(error) => (Vec::new(), Some(error)),
     };
-    let mut failed = registry_error.is_some() || store.delete(OWNER).is_err();
+    // The app lock entry goes FIRST: a sign-out cut short must never leave `lock.app_lock = 0`
+    // (it opens the next account without a proof); every other lock entry left behind fails closed.
+    let mut failed = store.delete(LOCK_APP_LOCK).is_err();
+    failed |= registry_error.is_some() || store.delete(OWNER).is_err();
     failed |= delete_app_tokens(store, &app_ids, extra_app_id).is_err();
     let session_entries = [API_URL, MASTER_KEY, APP_IDS, HARDWARE_IDENTITY_SECRET, ACCOUNT_CHANGE];
     for name in session_entries.into_iter().chain(LOCK_ENTRIES) {

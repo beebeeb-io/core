@@ -46,7 +46,15 @@ impl std::fmt::Debug for AppLockProof {
 fn proof_answer(judgement: Judgement) -> Result<(), AuthError> {
     match judgement {
         Judgement::Accepted => Ok(()),
-        Judgement::Wrong { .. } => Err(AuthError::PasswordNotConfirmed),
+        // As the screen unlock reports it: the wait, and the tenth try turning the local check off.
+        Judgement::Wrong { failures } => Err(AuthError::PasswordWrong {
+            wait_ms: if failures == LOCAL_CHECK_OFF_AT {
+                0
+            } else {
+                wait_after_ms(failures)
+            },
+            local_check_off: failures == LOCAL_CHECK_OFF_AT,
+        }),
         Judgement::Wait { wait_ms } => Err(AuthError::PasswordTryWait { wait_ms }),
         Judgement::ServerLimit { wait_ms } => Err(AuthError::PasswordCheckLimited { wait_ms }),
         Judgement::OfflineNoRecord => Err(AuthError::PasswordProofOffline),
@@ -236,6 +244,12 @@ impl Client {
         if self.generation() != generation {
             return Err(ClientError::StaleAccount.into());
         }
+        if self.lock_state() != LockState::Open {
+            return Err(AuthError::InvalidTransition {
+                step: "start setting",
+                requirement: "the app is open",
+            });
+        }
         write_lock_flag(store, LOCK_ASK_AT_START, false).map_err(Into::into)
     }
 
@@ -259,13 +273,7 @@ impl Client {
             AppLockProof::PlatformVerified => ScreenProof::PlatformVerified,
             AppLockProof::Password(_) => ScreenProof::PasswordChecked,
         });
-        app_lock_may_change(self.lock_state(), on, screen_proof).map_err(|error| AuthError::InvalidTransition {
-            step: "app lock",
-            requirement: match error {
-                FlowError::StepOutOfOrder => "a proof the screen unlock accepts, given for this change",
-                FlowError::StepNotRequired | FlowError::NotReady => "the app is open",
-            },
-        })?;
+        self.check_app_lock_change(on, screen_proof)?;
         if let (false, Some(AppLockProof::Password(password))) = (on, proof) {
             if !self.lock_password_path() {
                 return Err(AuthError::PasswordCheckUnavailable);
@@ -281,8 +289,20 @@ impl Client {
             if self.generation() != generation {
                 return Err(ClientError::StaleAccount.into());
             }
+            // The wait let the screen lock in: only an open app changes the setting.
+            self.check_app_lock_change(on, Some(ScreenProof::PasswordChecked))?;
         }
         write_lock_flag(store, LOCK_APP_LOCK, on).map_err(Into::into)
+    }
+
+    fn check_app_lock_change(&self, on: bool, screen_proof: Option<ScreenProof>) -> Result<(), AuthError> {
+        app_lock_may_change(self.lock_state(), on, screen_proof).map_err(|error| AuthError::InvalidTransition {
+            step: "app lock",
+            requirement: match error {
+                FlowError::StepOutOfOrder => "a proof the screen unlock accepts, given for this change",
+                FlowError::StepNotRequired | FlowError::NotReady => "the app is open",
+            },
+        })
     }
 
     /// One typed password, counted once whichever checks it goes through.

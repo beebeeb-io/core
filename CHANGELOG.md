@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A wrong password typed as the proof for `set_app_lock` or `set_ask_password_at_start` is now
+  `AuthError::PasswordWrong { wait_ms, local_check_off }` (was `PasswordNotConfirmed`), so a host can
+  show the wait and that offline unlock is off after the tenth wrong try, as the screen unlock does.
+  Both calls also refuse (write nothing) when the app was screen-locked while the proof was checked.
+  An account's first `Session::save` clears every lock entry, and a device sign-out deletes
+  `lock.app_lock` first, so an interrupted sign-out cannot leave the setting off for the next account.
 - Core applies the screen lock itself. While `ScreenLocked`, every `beebeeb-client` call a person
   drives answers the new `ClientError::ScreenLocked` before anything is sent (`session_key`, the file,
   sharing, account, device and settings calls, the download, thumbnail and archive reads); unlock,
