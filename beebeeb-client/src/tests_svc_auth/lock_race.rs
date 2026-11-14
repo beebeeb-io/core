@@ -420,3 +420,74 @@ async fn a_screen_lock_asked_for_in_the_tail_of_a_password_change_is_applied() {
     assert_eq!(client.lock_state(), LockState::ScreenLocked);
     assert!(client.held_key().unwrap().is_current(&client));
 }
+
+/// The same for a strong unlock: a screen lock asked for between its proof and its install
+/// (here: in its save) is refused there and applied by that install.
+#[tokio::test]
+async fn a_screen_lock_asked_for_in_the_tail_of_a_strong_unlock_is_applied() {
+    let server = LockServer::new();
+    let store = Arc::new(store_with_session());
+    store.set(LOCK_VAULT_CLOSED, b"1").unwrap();
+    let client = Arc::new(Client::new(config(false), server.clone()).unwrap());
+    assert_eq!(client.start_from_store(store.as_ref()).unwrap(), LockState::VaultClosed);
+    let accepted = accepted_password(&client, store.as_ref()).await;
+    let asking = client.clone();
+    let racing = RacingStore::new(store.clone(), Write::Set(TOKEN_ENTRY), move || {
+        assert_eq!(asking.lock_state(), LockState::VaultClosed);
+        assert!(asking.lock_screen().is_err());
+    });
+
+    client.unlock_known_device(accepted, &racing).await.unwrap();
+    assert!(racing.landed());
+    assert_eq!(client.lock_state(), LockState::ScreenLocked);
+    assert!(client.held_key().unwrap().is_current(&client), "the key is installed");
+    assert_eq!(mark(&store), None, "the vault is open: only the screen is locked");
+}
+
+/// A screen lock that was refused on a closed vault BEFORE the proof began is not kept for a
+/// later unlock: that unlock is the stronger and the newer proof, and the app opens.
+#[tokio::test]
+async fn a_screen_lock_refused_before_a_strong_unlock_began_is_not_applied() {
+    let server = LockServer::new();
+    let store = Arc::new(store_with_session());
+    store.set(LOCK_VAULT_CLOSED, b"1").unwrap();
+    let client = Arc::new(Client::new(config(false), server.clone()).unwrap());
+    assert_eq!(client.start_from_store(store.as_ref()).unwrap(), LockState::VaultClosed);
+    assert!(client.lock_screen().is_err(), "a closed vault is never screen-locked");
+
+    let accepted = accepted_password(&client, store.as_ref()).await;
+    client.unlock_known_device(accepted, store.as_ref()).await.unwrap();
+    assert_eq!(client.lock_state(), LockState::Open);
+}
+
+/// Asking for the screen lock, and recording a refused request, is one step: while it runs,
+/// no other thread can read or move the lock, so no install can land between the two.
+#[test]
+fn asking_for_the_screen_lock_is_one_step_with_the_lock() {
+    let server = LockServer::new();
+    let (client, _store) = open_app(&server);
+    let other = client.clone();
+    let (done, finished) = std::sync::mpsc::channel();
+    let mut reader = None;
+
+    let answer = client
+        .ask_screen_lock(|flow| {
+            reader = Some(std::thread::spawn(move || {
+                let state = other.lock_state();
+                done.send(state).unwrap();
+            }));
+            assert!(
+                finished.recv_timeout(std::time::Duration::from_millis(300)).is_err(),
+                "another thread read the lock while the screen lock was being asked for"
+            );
+            flow.lock(beebeeb_api::flows::LockLevel::Screen)
+        })
+        .unwrap();
+    assert!(answer.is_ok());
+    reader.unwrap().join().unwrap();
+    assert_eq!(
+        finished.recv().unwrap(),
+        LockState::ScreenLocked,
+        "the reader saw the lock only after the step: already screen-locked"
+    );
+}

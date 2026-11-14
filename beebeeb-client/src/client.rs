@@ -101,6 +101,10 @@ enum RequestAuthentication<'a> {
     Bearer(&'a str),
 }
 
+/// No screen lock is waiting for an install (`Client::screen_lock_pending`). A generation
+/// never reaches this value.
+const NO_SCREEN_LOCK_PENDING: u64 = u64::MAX;
+
 pub struct Client {
     config: ClientConfig,
     transport: Arc<dyn Transport>,
@@ -110,9 +114,12 @@ pub struct Client {
     /// that was refused reads them to learn whether a sign-out is what overtook it.
     sign_outs: AtomicU64,
     device_sign_outs: AtomicU64,
-    /// How often a screen lock was asked for. A password change reads it: a lock asked for
-    /// while the change held the app closed is applied when the change installs.
-    screen_locks_asked: AtomicU64,
+    /// A screen lock that was asked for while the app was held closed, as the account
+    /// generation it was asked at ([`NO_SCREEN_LOCK_PENDING`] when there is none). Written and
+    /// read only inside [`Client::with_session`], so asking, recording and applying it are one
+    /// step each for every other thread: the install of that generation applies it
+    /// ([`Client::install_session_at`]), and no install of another generation ever does.
+    screen_lock_pending: AtomicU64,
     events: EngineEvents,
     /// The two-level lock of this app process. Taken alone, or after `authentication` by the
     /// steps that change the session and the lock as one ([`Client::with_session`]); never
@@ -174,7 +181,7 @@ impl Client {
             generation: AtomicU64::new(0),
             sign_outs: AtomicU64::new(0),
             device_sign_outs: AtomicU64::new(0),
-            screen_locks_asked: AtomicU64::new(0),
+            screen_lock_pending: AtomicU64::new(NO_SCREEN_LOCK_PENDING),
             lock: Mutex::new(LockFlow::at_start(StartFacts {
                 session_stored: false,
                 ask_password_at_start: Some(false),
@@ -223,15 +230,23 @@ impl Client {
             .map(|(generation, _)| generation)
     }
 
-    /// Counts a screen lock that was asked for, whatever became of it.
+    /// Asks for the screen lock, in one step over the session and the lock: `lock` moves the
+    /// lock, and when it is refused because the app is closed, the request is recorded for
+    /// the account generation it was asked at, in the same hold. Nothing can land between the
+    /// refusal and the record, so an install that is on its way either sees the screen
+    /// already locked (and puts that state back) or finds the request and applies it.
     #[cfg(feature = "auth")]
-    pub(crate) fn screen_lock_asked(&self) {
-        self.screen_locks_asked.fetch_add(1, Ordering::AcqRel);
-    }
-
-    #[cfg(feature = "auth")]
-    pub(crate) fn screen_locks_asked(&self) -> u64 {
-        self.screen_locks_asked.load(Ordering::Acquire)
+    pub(crate) fn ask_screen_lock<T, E>(
+        &self,
+        lock: impl FnOnce(&mut LockFlow) -> Result<T, E>,
+    ) -> Result<Result<T, E>, ClientError> {
+        self.with_session(|_, flow| {
+            let answer = lock(flow);
+            if answer.is_err() && flow.state() == LockState::VaultClosed {
+                self.screen_lock_pending.store(self.generation(), Ordering::Release);
+            }
+            answer
+        })
     }
 
     /// [`Self::set_authentication`], with the lock as it was just before these credentials
@@ -376,6 +391,14 @@ impl Client {
             }
             let generation = self.put_session(authentication, session);
             opened(flow);
+            // A screen lock asked for while these credentials held the app closed
+            // ([`Self::ask_screen_lock`]) is applied with the install, in the same hold: the
+            // app comes back screen-locked. A request from before these credentials were set
+            // is for another generation and is dropped: this install is the stronger proof.
+            let pending = self.screen_lock_pending.swap(NO_SCREEN_LOCK_PENDING, Ordering::AcqRel);
+            if pending == expected && flow.state() == LockState::Open {
+                let _ = flow.lock(beebeeb_api::flows::LockLevel::Screen);
+            }
             Ok(generation)
         })?
     }

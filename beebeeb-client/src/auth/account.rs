@@ -207,7 +207,6 @@ impl Client {
         // the process: a vault lock or a sign-out that landed since the call began, also
         // between the last answer and this step, wins. No key is loaded again for it.
         let sign_outs = self.sign_outs();
-        let screen_locks = self.screen_locks_asked();
         let set = self.set_authentication_reading_lock(
             changed.session_token.clone(),
             changed.user_id.clone(),
@@ -258,11 +257,9 @@ impl Client {
         // not installed again and the lock is not opened.
         let installed = self.install_session_at(&refreshed, changed_at, |flow| {
             if beebeeb_api::flows::key_may_be_loaded(lock_before.state()) {
+                // A screen lock asked for while the app was held closed is not lost either:
+                // `install_session_at` applies it in this same step.
                 *flow = lock_before;
-                // A screen lock asked for while the app was held closed is not lost.
-                if self.screen_locks_asked() != screen_locks {
-                    let _ = flow.lock(beebeeb_api::flows::LockLevel::Screen);
-                }
             }
         });
         if let Err(error) = installed {

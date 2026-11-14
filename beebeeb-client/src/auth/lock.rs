@@ -92,12 +92,13 @@ impl Client {
     /// the work stay as they are.
     ///
     /// A closed vault is never screen-locked, so the call is refused there. One case keeps
-    /// the request all the same: while a password change holds the app closed between its
-    /// last answer and its install, the lock that was asked for is applied when the change
-    /// installs, and the app comes back screen-locked.
+    /// the request all the same: while an install is on its way (a password change between
+    /// its last answer and its install, a strong unlock between its proof and its install)
+    /// the app is held closed, and the lock that was asked for is applied when that install
+    /// lands: the app comes back screen-locked. The request is taken and recorded in one step
+    /// with the lock ([`Client::ask_screen_lock`]), so it cannot fall between the two.
     pub fn lock_screen(&self) -> Result<(), AuthError> {
-        self.screen_lock_asked();
-        self.with_lock_flow(|flow| flow.lock(LockLevel::Screen))?
+        self.ask_screen_lock(|flow| flow.lock(LockLevel::Screen))?
             .map_err(|error| refused("screen lock", error))
     }
 
