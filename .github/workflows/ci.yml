@@ -272,7 +272,7 @@ jobs:
       # parse (JavaVersion.parse throws IllegalArgumentException on "25.0.5").
       # Pin Java 21 LTS so kotlinc has a known-good JVM regardless of the
       # runner's default. Temurin is Eclipse Adoptium OpenJDK — no license issues.
-      - uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: '21'
