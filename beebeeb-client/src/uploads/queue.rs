@@ -477,6 +477,7 @@ impl UploadService {
     }
 
     pub fn pause(&self, id: i64, now_ms: i64) -> Result<bool, UploadServiceError> {
+        self.client.person_call(crate::LockedAction::MutateFiles)?;
         let changed = self
             .store
             .lock()
@@ -493,6 +494,7 @@ impl UploadService {
     }
 
     pub fn resume(&self, id: i64, now_ms: i64) -> Result<bool, UploadServiceError> {
+        self.client.person_call(crate::LockedAction::MutateFiles)?;
         let changed = self
             .store
             .lock()
@@ -508,7 +510,23 @@ impl UploadService {
         Ok(changed)
     }
 
+    /// Cancels an upload because a person chose to: refused on a locked screen. The work
+    /// cancels its own with [`Self::cancel_work`].
     pub fn cancel(&self, id: i64, now_ms: i64) -> Result<SignOutPlan, UploadServiceError> {
+        self.client.person_call(crate::LockedAction::MutateFiles)?;
+        self.cancel_inner(id, now_ms)
+    }
+
+    /// Cancels an upload the work queued itself ([`Self::enqueue_work`]) and no longer wants,
+    /// such as a synced file that was removed or replaced before it was sent. Work: it runs
+    /// on a locked screen and not on a closed vault. Never for a person's cancel in the
+    /// window ([`Self::cancel`]); which of the two a host calls is the host's word.
+    pub fn cancel_work(&self, id: i64, now_ms: i64) -> Result<SignOutPlan, UploadServiceError> {
+        self.client.work_call()?;
+        self.cancel_inner(id, now_ms)
+    }
+
+    pub(crate) fn cancel_inner(&self, id: i64, now_ms: i64) -> Result<SignOutPlan, UploadServiceError> {
         let transfer = self.transfer(id)?;
         let record = decode_record(&transfer.payload)?;
         let mut plan = SignOutPlan {
@@ -560,7 +578,7 @@ impl UploadService {
         for id in ids {
             // One that cannot be cancelled now fails on its own: its source
             // is deleted next.
-            if let Ok(plan) = self.cancel(id, now_ms) {
+            if let Ok(plan) = self.cancel_inner(id, now_ms) {
                 cancelled += 1;
                 for path in plan.delete_files {
                     let _ = std::fs::remove_file(path);
@@ -666,7 +684,7 @@ impl UploadService {
     }
 
     fn cancel_backup_upload(&self, id: i64, now_ms: i64) -> Result<(), UploadServiceError> {
-        match self.cancel(id, now_ms) {
+        match self.cancel_inner(id, now_ms) {
             Ok(plan) => remove_planned_files(&plan),
             // Its planner could not be read: it is cancelled all the same,
             // so it never completes; its staged chunks stay until sign-out.
@@ -734,7 +752,7 @@ impl UploadService {
             delete_files: Vec::new(),
         };
         for id in ids {
-            if let Ok(plan) = self.cancel(id, now_ms) {
+            if let Ok(plan) = self.cancel_inner(id, now_ms) {
                 combined.cancel_tickets.extend(plan.cancel_tickets);
                 combined.delete_files.extend(plan.delete_files);
             }

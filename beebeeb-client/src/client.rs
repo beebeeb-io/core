@@ -101,6 +101,29 @@ enum RequestAuthentication<'a> {
     Bearer(&'a str),
 }
 
+/// Held by a password change from its last request to its return.
+#[cfg(feature = "auth")]
+pub(crate) struct PasswordChangeFinishing<'a>(&'a Client);
+
+#[cfg(feature = "auth")]
+impl Drop for PasswordChangeFinishing<'_> {
+    fn drop(&mut self) {
+        self.0.password_change_in_flight.store(false, Ordering::Release);
+    }
+}
+
+/// What the lock mutex guards: the lock itself and the one request that may be waiting on it.
+/// They share the mutex so that taking a request, recording it and applying it can never be
+/// done outside the step that reads or moves the lock.
+struct LockCell {
+    flow: LockFlow,
+    /// A screen lock that was asked for while an install held the app closed, as the account
+    /// generation it was asked at. The install of that generation applies it
+    /// ([`Client::install_session_at`]); no install of another generation ever does.
+    #[cfg_attr(not(feature = "auth"), allow(dead_code))]
+    screen_lock_pending: Option<u64>,
+}
+
 pub struct Client {
     config: ClientConfig,
     transport: Arc<dyn Transport>,
@@ -110,11 +133,16 @@ pub struct Client {
     /// that was refused reads them to learn whether a sign-out is what overtook it.
     sign_outs: AtomicU64,
     device_sign_outs: AtomicU64,
+    /// True while a password change is between sending its last request and its install. The
+    /// server ends every session of the account in that request, the old token included, so a
+    /// refusal of the old session that arrives in that window (a sync poll, an upload chunk)
+    /// is the change's own doing and must not close the vault under it.
+    password_change_in_flight: std::sync::atomic::AtomicBool,
     events: EngineEvents,
     /// The two-level lock of this app process. Taken alone, or after `authentication` by the
     /// steps that change the session and the lock as one ([`Client::with_session`]); never
     /// before it.
-    lock: Mutex<LockFlow>,
+    lock: Mutex<LockCell>,
     /// One password check of the lock at a time: its wrong-try count is read, written and
     /// restored around requests, and two overlapping tries would share one count.
     #[cfg(feature = "auth")]
@@ -171,11 +199,15 @@ impl Client {
             generation: AtomicU64::new(0),
             sign_outs: AtomicU64::new(0),
             device_sign_outs: AtomicU64::new(0),
-            lock: Mutex::new(LockFlow::at_start(StartFacts {
-                session_stored: false,
-                ask_password_at_start: Some(false),
-                vault_closed: Some(false),
-            })),
+            password_change_in_flight: std::sync::atomic::AtomicBool::new(false),
+            lock: Mutex::new(LockCell {
+                flow: LockFlow::at_start(StartFacts {
+                    session_stored: false,
+                    ask_password_at_start: Some(false),
+                    vault_closed: Some(false),
+                }),
+                screen_lock_pending: None,
+            }),
             #[cfg(feature = "auth")]
             password_check: tokio::sync::Mutex::new(()),
         })
@@ -215,16 +247,39 @@ impl Client {
         token: impl Into<String>,
         expected_user: impl Into<String>,
     ) -> Result<u64, ClientError> {
-        self.set_authentication_reading_lock(token, expected_user)
+        self.set_authentication_reading_lock(token, expected_user, None)
             .map(|(generation, _)| generation)
+    }
+
+    /// Asks for the screen lock, in one step over the session and the lock. When the lock
+    /// refuses because the app is closed while it holds credentials (an install is on its
+    /// way), the request is recorded for the account generation it was asked at, in the same
+    /// hold and in the same cell as the lock. Nothing can land between the refusal and the
+    /// record: an install that is on its way either sees the screen already locked (and puts
+    /// that state back) or finds the request and applies it. A closed app without
+    /// credentials has no install on its way; a later proof is the newer and stronger word,
+    /// and nothing is recorded for it.
+    #[cfg(feature = "auth")]
+    pub(crate) fn ask_screen_lock(&self) -> Result<Result<(), beebeeb_api::flows::FlowError>, ClientError> {
+        self.with_session_cell(|authentication, cell| {
+            let answer = cell.flow.lock(beebeeb_api::flows::LockLevel::Screen);
+            if answer.is_err() && cell.flow.state() == LockState::VaultClosed && authentication.is_some() {
+                cell.screen_lock_pending = Some(self.generation());
+            }
+            answer
+        })
     }
 
     /// [`Self::set_authentication`], with the lock as it was just before these credentials
     /// closed it: read in the same step, so nothing lands between the read and the close.
+    /// With `only_at`, the credentials are set only while the account generation is still
+    /// that one: whatever landed since it was read (a vault lock, a sign-out, an ended
+    /// session) wins, nothing is set, and the answer is `StaleAccount`.
     pub(crate) fn set_authentication_reading_lock(
         &self,
         token: impl Into<String>,
         expected_user: impl Into<String>,
+        only_at: Option<u64>,
     ) -> Result<(u64, LockFlow), ClientError> {
         let token = token.into();
         let expected_user = expected_user.into();
@@ -232,6 +287,9 @@ impl Client {
             return Err(ClientError::InvalidAuthentication);
         }
         self.with_session(|authentication, flow| {
+            if only_at.is_some_and(|expected| self.generation() != expected) {
+                return Err(ClientError::StaleAccount);
+            }
             let before = flow.clone();
             let generation = self.advance_generation();
             *authentication = Some(Authentication {
@@ -244,8 +302,8 @@ impl Client {
             // held the key no longer does, so its lock state must not keep describing the old
             // session. A strong install that follows opens it again; nothing weaker does.
             flow.session_ended();
-            (generation, before)
-        })
+            Ok((generation, before))
+        })?
     }
 
     /// One step over the session and the lock together. Every step that drops, replaces or
@@ -255,9 +313,17 @@ impl Client {
         &self,
         step: impl FnOnce(&mut Option<Authentication>, &mut LockFlow) -> R,
     ) -> Result<R, ClientError> {
+        self.with_session_cell(|authentication, cell| step(authentication, &mut cell.flow))
+    }
+
+    /// [`Self::with_session`], with the request that may be waiting on the lock.
+    fn with_session_cell<R>(
+        &self,
+        step: impl FnOnce(&mut Option<Authentication>, &mut LockCell) -> R,
+    ) -> Result<R, ClientError> {
         let mut authentication = self.authentication.lock().map_err(|_| ClientError::State)?;
-        let mut flow = self.lock.lock().map_err(|_| ClientError::State)?;
-        Ok(step(&mut authentication, &mut flow))
+        let mut cell = self.lock.lock().map_err(|_| ClientError::State)?;
+        Ok(step(&mut authentication, &mut cell))
     }
 
     /// The lock state of this app process. A host that installs sessions itself with
@@ -266,7 +332,7 @@ impl Client {
     pub fn lock_state(&self) -> LockState {
         self.lock
             .lock()
-            .map(|flow| flow.state())
+            .map(|cell| cell.flow.state())
             .unwrap_or(LockState::VaultClosed)
     }
 
@@ -298,8 +364,8 @@ impl Client {
     }
 
     pub(crate) fn with_lock_flow<R>(&self, step: impl FnOnce(&mut LockFlow) -> R) -> Result<R, ClientError> {
-        let mut flow = self.lock.lock().map_err(|_| ClientError::State)?;
-        Ok(step(&mut flow))
+        let mut cell = self.lock.lock().map_err(|_| ClientError::State)?;
+        Ok(step(&mut cell.flow))
     }
 
     /// Installs a restored session. Refused while the vault is closed: a closed vault is
@@ -309,10 +375,14 @@ impl Client {
     /// `Session::load_for_user` before it): it starts with `start_from_store`, which applies
     /// the "ask for my password at start" setting. This pair does not read that setting.
     pub fn set_session(&self, session: &Session) -> Result<u64, ClientError> {
-        if self.lock_state() == LockState::VaultClosed {
-            return Err(ClientError::VaultClosed);
-        }
-        self.install_session(session)
+        // The lock is read and the session installed in one step: a vault lock cannot land
+        // between the two. A lock that cannot be read refuses.
+        self.with_session(|authentication, flow| {
+            if flow.state() == LockState::VaultClosed {
+                return Err(ClientError::VaultClosed);
+            }
+            Ok(self.put_session(authentication, session))
+        })?
     }
 
     pub(crate) fn install_session(&self, session: &Session) -> Result<u64, ClientError> {
@@ -344,12 +414,19 @@ impl Client {
         expected: u64,
         opened: impl FnOnce(&mut LockFlow),
     ) -> Result<u64, ClientError> {
-        self.with_session(|authentication, flow| {
+        self.with_session_cell(|authentication, cell| {
             if self.generation() != expected {
                 return Err(ClientError::StaleAccount);
             }
             let generation = self.put_session(authentication, session);
-            opened(flow);
+            opened(&mut cell.flow);
+            // A screen lock asked for while these credentials held the app closed
+            // ([`Self::ask_screen_lock`]) is applied with the install, in the same hold: the
+            // app comes back screen-locked. A request recorded for another generation is
+            // dropped: this install is the newer proof.
+            if cell.screen_lock_pending.take() == Some(expected) && cell.flow.state() == LockState::Open {
+                let _ = cell.flow.lock(beebeeb_api::flows::LockLevel::Screen);
+            }
             Ok(generation)
         })?
     }
@@ -441,6 +518,14 @@ impl Client {
         self.sign_out_authentication()
     }
 
+    /// Marks a password change as finishing, until the returned guard is dropped
+    /// ([`Self::session_expired`] reads it).
+    #[cfg(feature = "auth")]
+    pub(crate) fn password_change_finishing(&self) -> PasswordChangeFinishing<'_> {
+        self.password_change_in_flight.store(true, Ordering::Release);
+        PasswordChangeFinishing(self)
+    }
+
     /// The sign-outs of this process so far: (all, of the whole device).
     #[cfg(feature = "auth")]
     pub(crate) fn sign_outs(&self) -> (u64, u64) {
@@ -509,7 +594,14 @@ impl Client {
     /// This closes the vault in this process only. The store is not at hand here, so the
     /// host records it with `Client::session_ended` (core's own lock calls do it themselves);
     /// until then a restart starts screen-locked and closes again at the first refusal.
-    fn session_expired(&self, generation: u64) {
+    pub(crate) fn session_expired(&self, generation: u64) {
+        // A password change ends the old session at the server before its answer is back: a
+        // refusal that arrives while the change is finishing is expected and says nothing new.
+        // The change installs the new session or fails; if the session really is gone, the
+        // next request says so again.
+        if self.password_change_in_flight.load(Ordering::Acquire) {
+            return;
+        }
         let dropped = self.with_session(|authentication, flow| {
             let current = matches!(flow.state(), LockState::Open | LockState::ScreenLocked)
                 && authentication

@@ -371,6 +371,14 @@ impl DeviceServiceHandle {
     }
 
     pub fn acknowledge_device_link(&self, approval: &DeviceApprovalHandle) -> Result<(), ServiceError> {
+        // Asked before the acknowledgement is taken out of its handle: a refusal by the lock
+        // leaves it there, and the same call works after the unlock.
+        self.root
+            .client
+            .check_call(beebeeb_client::Call::Person(
+                beebeeb_client::LockedAction::AcknowledgeDeviceLink,
+            ))
+            .map_err(map_client_error)?;
         let acknowledgement = approval
             .acknowledgement
             .lock()

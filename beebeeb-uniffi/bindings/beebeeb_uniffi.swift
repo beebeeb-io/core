@@ -2447,7 +2447,18 @@ public protocol BackupServiceHandleProtocol: AnyObject, Sendable {
      */
     func backUpAgain() throws 
     
+    /**
+     * Sets where and how this device backs up: a person's choice now, refused on a locked
+     * screen. At a start of the app, put the saved choice back with `configure_saved`.
+     */
     func configure(configuration: BackupConfigurationData) throws 
+    
+    /**
+     * Puts back the configuration a person chose earlier, at a start of the app: it runs on a
+     * locked screen, so the backup keeps working there. Refused on a closed vault (call it
+     * again after the unlock). Never for a choice made now.
+     */
+    func configureSaved(configuration: BackupConfigurationData) throws 
     
     func events()  -> BackupEventStreamHandle
     
@@ -2536,8 +2547,25 @@ open func backUpAgain()throws   {try rustCallWithError(FfiConverterTypeServiceEr
 }
 }
     
+    /**
+     * Sets where and how this device backs up: a person's choice now, refused on a locked
+     * screen. At a start of the app, put the saved choice back with `configure_saved`.
+     */
 open func configure(configuration: BackupConfigurationData)throws   {try rustCallWithError(FfiConverterTypeServiceError_lift) {
     uniffi_beebeeb_uniffi_fn_method_backupservicehandle_configure(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeBackupConfigurationData_lower(configuration),$0
+    )
+}
+}
+    
+    /**
+     * Puts back the configuration a person chose earlier, at a start of the app: it runs on a
+     * locked screen, so the backup keeps working there. Refused on a closed vault (call it
+     * again after the unlock). Never for a choice made now.
+     */
+open func configureSaved(configuration: BackupConfigurationData)throws   {try rustCallWithError(FfiConverterTypeServiceError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_backupservicehandle_configure_saved(
             self.uniffiCloneHandle(),
         FfiConverterTypeBackupConfigurationData_lower(configuration),$0
     )
@@ -27920,6 +27948,17 @@ public enum ServiceError: Swift.Error, Equatable, Hashable, Foundation.Localized
      */
     case ShareRefused(code: String
     )
+    /**
+     * The app is locked on this device and the call is one a person drives: core refused
+     * it before anything was sent. The stored session is untouched; unlock, then retry.
+     */
+    case ScreenLocked
+    /**
+     * The vault is closed: the work is stopped, and a person can only prove the account
+     * password, lock or sign out. Not an expired session: never remove the stored session
+     * on this answer.
+     */
+    case VaultClosed
 
     
 
@@ -27983,6 +28022,8 @@ public struct FfiConverterTypeServiceError: FfiConverterRustBuffer {
         case 23: return .ShareRefused(
             code: try FfiConverterString.read(from: &buf)
             )
+        case 24: return .ScreenLocked
+        case 25: return .VaultClosed
 
          default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -28092,6 +28133,14 @@ public struct FfiConverterTypeServiceError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(23))
             FfiConverterString.write(code, into: &buf)
             
+        
+        case .ScreenLocked:
+            writeInt(&buf, Int32(24))
+        
+        
+        case .VaultClosed:
+            writeInt(&buf, Int32(25))
+        
         }
     }
 }
@@ -28139,6 +28188,8 @@ public enum ServiceErrorKind: Equatable, Hashable {
     case subscriptionActive
     case emailNotSent
     case shareRefused
+    case screenLocked
+    case vaultClosed
 
 
 
@@ -28205,6 +28256,10 @@ public struct FfiConverterTypeServiceErrorKind: FfiConverterRustBuffer {
         case 22: return .emailNotSent
         
         case 23: return .shareRefused
+        
+        case 24: return .screenLocked
+        
+        case 25: return .vaultClosed
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -28304,6 +28359,14 @@ public struct FfiConverterTypeServiceErrorKind: FfiConverterRustBuffer {
         
         case .shareRefused:
             writeInt(&buf, Int32(23))
+        
+        
+        case .screenLocked:
+            writeInt(&buf, Int32(24))
+        
+        
+        case .vaultClosed:
+            writeInt(&buf, Int32(25))
         
         }
     }
@@ -35057,7 +35120,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_back_up_again() != 28592) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_configure() != 38428) {
+    if (uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_configure() != 50289) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_configure_saved() != 13958) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_events() != 53248) {

@@ -7,7 +7,7 @@
 //! store. The screen lock gates the app window; the vault lock removes the key from this
 //! app's process and stops the work.
 
-use beebeeb_api::flows::{FlowError, LockFlow, LockLevel, StartFacts};
+use beebeeb_api::flows::{FlowError, LockFlow, StartFacts};
 use beebeeb_core::screen_lock::ScreenCheckRecord;
 
 pub use beebeeb_api::flows::LockState;
@@ -90,9 +90,15 @@ impl Client {
 
     /// Locks the screen level by hand, by host policy or with the OS session. The key and
     /// the work stay as they are.
+    ///
+    /// A closed vault is never screen-locked, so the call is refused there. One case keeps
+    /// the request all the same: while an install is on its way (a password change between
+    /// its last answer and its install, a strong unlock between its proof and its install)
+    /// the app is held closed, and the lock that was asked for is applied when that install
+    /// lands: the app comes back screen-locked. The request is taken and recorded in one step
+    /// with the lock ([`Client::ask_screen_lock`]), so it cannot fall between the two.
     pub fn lock_screen(&self) -> Result<(), AuthError> {
-        self.with_lock_flow(|flow| flow.lock(LockLevel::Screen))?
-            .map_err(|error| refused("screen lock", error))
+        self.ask_screen_lock()?.map_err(|error| refused("screen lock", error))
     }
 
     /// Opens the screen lock on the host's statement that the operating system verified the

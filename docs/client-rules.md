@@ -52,7 +52,10 @@ with `sign_in_on_device` (plus `submit_two_factor`) and `unlock_known_device`. W
 host shows no file name, account data or thumbnail and keeps the window out of screen capture. Core
 itself refuses every call a person drives except unlock, lock vault and sign out (`screen_locked_allows`,
 answered as `ClientError::ScreenLocked`; a sign-out there removes this device only), and keeps sync,
-transfers and backup running; the list is in `docs/agent-notes.md`, "What the screen lock refuses". A
+transfers and backup running; on a closed vault it refuses a person's calls too, except the proofs that
+open it, a lock and a sign-out. The list is in `docs/agent-notes.md`, "What the screen lock refuses". A
+host sends only sync, backup and the file provider through the work's calls (`enqueue_work`,
+`configure_saved`, the file provider's own), never something a person starts from the window. A
 host never works around a refusal, and asks `Client::check_call` before a path core cannot see (a read
 of the local store or the search index that would show a name). After
 `SessionExpired` a host calls `Client::session_ended`. Both levels are locks on the app, not

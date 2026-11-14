@@ -201,7 +201,7 @@ impl Client {
         device_name: String,
     ) -> Result<PendingNewDeviceLink, DeviceError> {
         self.set_authentication(accepted.session_token.to_string(), accepted.owner.clone())?;
-        let result = self.start_device_link(device_name).await;
+        let result = self.start_device_link_inner(device_name).await;
         if result.is_err() {
             let _ = self.clear_authentication();
         }
@@ -209,6 +209,14 @@ impl Client {
     }
 
     pub async fn start_device_link(&self, device_name: String) -> Result<PendingNewDeviceLink, DeviceError> {
+        self.person_call(crate::LockedAction::StartDeviceLink)?;
+        self.start_device_link_inner(device_name).await
+    }
+
+    pub(crate) async fn start_device_link_inner(
+        &self,
+        device_name: String,
+    ) -> Result<PendingNewDeviceLink, DeviceError> {
         let id = uuid::Uuid::new_v4();
         // The canonical name is what goes to the relay and what the typed-code
         // confirmation binds; a name with nothing visible is refused.
@@ -239,6 +247,7 @@ impl Client {
     }
 
     pub async fn poll_device_link(&self, pending: &mut PendingNewDeviceLink) -> Result<DeviceLinkPoll, DeviceError> {
+        self.person_call(crate::LockedAction::ReadDeviceLinkResult)?;
         if pending.link.is_none() {
             return Err(DeviceError::NotPending);
         }
@@ -273,6 +282,7 @@ impl Client {
     }
 
     pub async fn acknowledge_device_link(&self, acknowledgement: DeviceLinkAcknowledgement) -> Result<(), DeviceError> {
+        self.person_call(crate::LockedAction::AcknowledgeDeviceLink)?;
         self.execute(&proposed::ack_device_link(&acknowledgement.id), &())
             .await
             .map(|_| ())
@@ -406,6 +416,7 @@ impl Client {
         &self,
         pending: &mut PendingTypedReceiver,
     ) -> Result<DeviceLinkPoll, DeviceError> {
+        self.person_call(crate::LockedAction::ReadDeviceLinkResult)?;
         if pending.receiver.is_none() {
             return Err(DeviceError::NotPending);
         }
@@ -450,6 +461,7 @@ impl Client {
         role: proposed::DeviceLinkRole,
         message: &[u8],
     ) -> Result<(), DeviceError> {
+        self.person_call(crate::LockedAction::ExchangeDeviceLinkPake)?;
         if message.is_empty() {
             return Err(DeviceError::MalformedAnswer);
         }
@@ -470,6 +482,7 @@ impl Client {
         id: &str,
         role: proposed::DeviceLinkRole,
     ) -> Result<Option<Vec<u8>>, DeviceError> {
+        self.person_call(crate::LockedAction::ExchangeDeviceLinkPake)?;
         let answer = self
             .execute(&proposed::get_device_link_pake_for_role(id, role), &())
             .await?;
@@ -558,7 +571,11 @@ impl Client {
             return Ok(());
         };
         // Read, never made: a device without a stored identity cannot name itself here.
-        let own = crate::session::HardwareIdentity::stored_id(store).ok().flatten();
+        // An empty id names no device: it would equal an empty listed one.
+        let own = crate::session::HardwareIdentity::stored_id(store)
+            .ok()
+            .flatten()
+            .filter(|id| !id.is_empty());
         let this_device = own.is_some()
             && listed
                 .iter()
