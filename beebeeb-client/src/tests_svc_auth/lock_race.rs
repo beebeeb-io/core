@@ -372,6 +372,11 @@ async fn a_vault_lock_before_the_tail_of_a_password_change_wins() {
     );
     assert_eq!(mark(&store).as_deref(), Some(b"1".as_slice()));
     assert_eq!(entry(store.as_ref(), TOKEN_ENTRY).unwrap(), STORED_TOKEN.as_bytes());
+    // The session the server made for the change is used by nothing: it is ended there, next
+    // to the old one the vault lock ended.
+    let ended = server.logged_out_tokens();
+    assert_eq!(ended.len(), 2, "{ended:?}");
+    assert_ne!(ended[0], ended[1], "the old session and the unused new one");
     assert_eq!(
         entry(store.as_ref(), LOCK_SCREEN_CHECK),
         None,
@@ -460,34 +465,108 @@ async fn a_screen_lock_refused_before_a_strong_unlock_began_is_not_applied() {
     assert_eq!(client.lock_state(), LockState::Open);
 }
 
-/// Asking for the screen lock, and recording a refused request, is one step: while it runs,
-/// no other thread can read or move the lock, so no install can land between the two.
-#[test]
-fn asking_for_the_screen_lock_is_one_step_with_the_lock() {
-    let server = LockServer::new();
-    let (client, _store) = open_app(&server);
-    let other = client.clone();
-    let (done, finished) = std::sync::mpsc::channel();
-    let mut reader = None;
-
-    let answer = client
-        .ask_screen_lock(|flow| {
-            reader = Some(std::thread::spawn(move || {
-                let state = other.lock_state();
-                done.send(state).unwrap();
-            }));
-            assert!(
-                finished.recv_timeout(std::time::Duration::from_millis(300)).is_err(),
-                "another thread read the lock while the screen lock was being asked for"
-            );
-            flow.lock(beebeeb_api::flows::LockLevel::Screen)
-        })
+/// A closed vault with no credentials has no install on its way: a screen lock refused
+/// there is not kept, whatever proof comes later. A recovered install sets no credentials
+/// before it installs, so it runs at the very generation the request was refused at.
+#[tokio::test]
+async fn a_screen_lock_refused_on_an_idle_closed_vault_is_not_kept_for_a_recovered_install() {
+    let completing = Client::new(
+        config(false),
+        Arc::new(ScriptedTransport::json(
+            200,
+            serde_json::to_vec(&serde_json::json!({
+                "session_token": "recovered-token", "user_id": OWNER, "key_state": "proven",
+            }))
+            .unwrap(),
+        )),
+    )
+    .unwrap();
+    let attempt =
+        crate::auth::RecoveryAttempt::from_parts_for_test("recovery-id", "holder-secret", None, RecoveryState::Ready);
+    let recovered = completing
+        .complete_recovery(
+            &attempt,
+            EMAIL,
+            RecoveryChanges {
+                remove_authenticator: true,
+                ..RecoveryChanges::default()
+            },
+        )
+        .await
         .unwrap();
-    assert!(answer.is_ok());
-    reader.unwrap().join().unwrap();
-    assert_eq!(
-        finished.recv().unwrap(),
-        LockState::ScreenLocked,
-        "the reader saw the lock only after the step: already screen-locked"
+    let server = LockServer::new();
+    let (client, store) = open_app(&server);
+    client.lock_vault(store.as_ref()).await.unwrap();
+    assert_eq!(client.lock_state(), LockState::VaultClosed);
+    assert!(
+        client.account_id().is_err(),
+        "an idle closed vault holds no credentials"
     );
+    assert!(client.lock_screen().is_err(), "a closed vault is never screen-locked");
+
+    client
+        .install_recovered_session(
+            &recovered,
+            MasterKey::from_bytes([1; 32]),
+            "https://api.example",
+            store.as_ref(),
+        )
+        .unwrap();
+    assert_eq!(
+        client.lock_state(),
+        LockState::Open,
+        "the recovery is the newer proof: the old request is not applied"
+    );
+}
+
+/// The server ends the old session while it answers a password change. A refusal of that old
+/// session that arrives while the change is finishing (from the work, still on the old token)
+/// does not close the vault under the change: it installs, and the app stays as it was.
+#[tokio::test]
+async fn a_refusal_of_the_old_session_while_a_password_change_finishes_does_not_close_the_vault() {
+    let server = LockServer::new();
+    let (client, store) = open_app(&server);
+    let refused = client.clone();
+    let racing = RacingStore::new(store.clone(), Write::Get("session.owner"), move || {
+        refused.session_expired(refused.generation());
+    });
+
+    client
+        .change_password(password(PASSWORD), password(NEW_PASSWORD), &racing)
+        .await
+        .unwrap();
+    assert!(racing.landed());
+    assert_eq!(client.lock_state(), LockState::Open);
+    assert!(client.held_key().unwrap().is_current(&client));
+
+    // Once the change is over, a refusal of the session closes the vault as before.
+    client.session_expired(client.generation());
+    assert_eq!(client.lock_state(), LockState::VaultClosed);
+    assert!(client.held_key().is_err());
+}
+
+/// A request is for the credentials it was refused under. When another proof replaces them
+/// before any install (the person starts over), the install of the newer credentials opens
+/// the app: the request recorded for the older generation is dropped.
+#[tokio::test]
+async fn a_screen_lock_recorded_for_older_credentials_is_not_applied_to_newer_ones() {
+    let server = LockServer::new();
+    let store = Arc::new(store_with_session());
+    store.set(LOCK_VAULT_CLOSED, b"1").unwrap();
+    let client = Arc::new(Client::new(config(false), server.clone()).unwrap());
+    assert_eq!(client.start_from_store(store.as_ref()).unwrap(), LockState::VaultClosed);
+
+    // A first proof set its credentials and never installed.
+    let asked_at = client.set_authentication("abandoned-token", OWNER).unwrap();
+    assert_eq!(client.lock_state(), LockState::VaultClosed);
+    assert!(client.lock_screen().is_err(), "held closed by the first proof");
+
+    let accepted = accepted_password(&client, store.as_ref()).await;
+    client.unlock_known_device(accepted, store.as_ref()).await.unwrap();
+    assert_ne!(
+        client.generation(),
+        asked_at,
+        "the unlock ran under its own credentials"
+    );
+    assert_eq!(client.lock_state(), LockState::Open);
 }

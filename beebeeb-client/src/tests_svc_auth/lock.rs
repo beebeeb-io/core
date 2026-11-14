@@ -185,7 +185,7 @@ impl LockServer {
     }
 
     /// The bearer tokens of the logout requests, in order.
-    fn logged_out_tokens(&self) -> Vec<String> {
+    pub(super) fn logged_out_tokens(&self) -> Vec<String> {
         self.requests()
             .iter()
             .filter(|request| request.path() == LOGOUT)

@@ -41,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `lock_screen` asked for while an install holds the app closed (a password change or a strong unlock
   between its proof and its install) is still refused there, and is no longer lost: that install
   brings the app back `ScreenLocked`.
+- A password change no longer loses to its own session revocation: a refusal of the old session that
+  arrives while the change is finishing does not close the vault. When a vault lock or a sign-out wins
+  against a change, the session the server made for the change is ended at the server.
 - A password change and the strong installs (`unlock_known_device`, `install_new_device`,
   `install_recovered_session`) install only for the session they proved: a vault lock or a sign-out
   that lands after their credentials were set (for a recovery: after its install began) wins and the

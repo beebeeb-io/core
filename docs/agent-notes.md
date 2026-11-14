@@ -566,14 +566,22 @@ check record and wrong-try rule `beebeeb_core::screen_lock`, and the service on 
   starts the lock stays `SignedOut` throughout.
 - **A screen lock asked for while an install holds the app closed is not lost.** Between the step that
   sets an install's credentials and the install itself (a password change, a strong unlock, a new-device
-  or recovered install) the app reads `VaultClosed`, and a closed vault is never screen-locked, so
-  `lock_screen` is refused there. The request is kept: `Client::ask_screen_lock` moves the lock and, when
-  it is refused on a closed app, records the request for the account generation it was asked at, in ONE
-  hold of the session and lock mutexes; `install_session_at` applies it in its own hold when it installs
-  that generation, and the app comes back `ScreenLocked`. Never count or record a lock request outside
-  that hold (a request that raced an install was lost that way). A request refused before the
-  credentials were set belongs to an older generation and is dropped: that install is the newer and
-  stronger proof.
+  install) the app reads `VaultClosed`, and a closed vault is never screen-locked, so `lock_screen` is
+  refused there. The request is kept: `Client::ask_screen_lock` moves the lock and, when it is refused on
+  a closed app that holds credentials, records the request for the account generation it was asked at.
+  The record lives in the same mutex cell as the lock (`LockCell`), so it cannot be written or read
+  outside a step over the lock; `install_session_at` applies it in its own hold when it installs that
+  generation, and the app comes back `ScreenLocked`. Never count or record a lock request outside that
+  cell (a request that raced an install was lost that way). A closed app without credentials has no
+  install on its way, so nothing is recorded there, and a request recorded for older credentials is
+  dropped by the install of newer ones: that proof is the newer and stronger word.
+- **A password change does not close the vault under itself.** The server ends every session of the
+  account, the old token included, while it answers the change. From sending that last request to its
+  return the change holds `Client::password_change_finishing`, and `session_expired` ignores a refusal
+  that arrives meanwhile (the work, still on the old token): the change installs the new session or
+  fails, and a session that really is gone is refused again by the next request. When a vault lock or
+  a sign-out wins against the change, the session the server just made for it is ended there
+  (`end_retired_session`), so the winner leaves no live session behind.
 - **`Client::set_session`** reads the lock and installs in one hold too, and a lock that cannot be read
   refuses it (`ClientError::State`).
 - **A recovery install** is for the account generation it starts at, not the one its recovery was

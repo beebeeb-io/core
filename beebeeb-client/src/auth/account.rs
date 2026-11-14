@@ -179,6 +179,10 @@ impl Client {
         let upload = client_registration_finish(&registration_state, new_password.as_bytes(), &server_message)
             .map_err(|_| AuthError::Crypto)?;
         let second_confirmation = self.confirm_action(&current_password).await?;
+        // The server ends the old session in this request. Until this call returns, a refusal
+        // of that session (from the work, still on the old token) is the change's own doing
+        // and does not close the vault ([`Client::session_expired`]).
+        let _finishing = self.password_change_finishing();
         let changed = self
             .execute_confirmed(
                 &proposed::change_password_finish(),
@@ -217,6 +221,9 @@ impl Client {
             Err(error) => {
                 // The server has changed the password: the old password's record goes.
                 lock::replace_screen_check(store, None);
+                // The session the server just made is not used by anything: it is ended
+                // there, so the lock or sign-out that won leaves no live session behind.
+                let _ = self.end_retired_session(&changed.session_token, &changed.user_id).await;
                 return Err(error.into());
             }
         };
