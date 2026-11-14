@@ -202,6 +202,18 @@ async fn the_work_runs_on_a_locked_screen_and_stops_on_a_closed_vault() {
     );
     assert_eq!(server.requests().len(), 1);
     assert!(uploads.next_transfers(1, NetworkKind::WiFi, 1).await.unwrap().is_none());
+    // The work cancels an upload it queued itself; a person's cancel is refused here.
+    assert!(
+        !matches!(
+            uploads.cancel_work(1, 1),
+            Err(UploadServiceError::Client(ClientError::ScreenLocked))
+        ),
+        "the work's own cancel is not stopped by the screen lock"
+    );
+    assert!(matches!(
+        uploads.cancel(1, 1),
+        Err(UploadServiceError::Client(ClientError::ScreenLocked))
+    ));
     assert!(client.check_call(Call::Work).is_ok());
     // The three things a person may do there.
     for allowed in [
@@ -236,6 +248,10 @@ async fn the_work_runs_on_a_locked_screen_and_stops_on_a_closed_vault() {
             crate::uploads::UploadRequest::new(root.path().join("synced.txt"), "synced.txt", None, None),
             1,
         ),
+        Err(UploadServiceError::Client(ClientError::VaultClosed))
+    ));
+    assert!(matches!(
+        uploads.cancel_work(1, 1),
         Err(UploadServiceError::Client(ClientError::VaultClosed))
     ));
     // A password change is made from an open app: a closed vault holds no key to keep.
@@ -450,8 +466,8 @@ fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
         (
             "uploads/queue.rs",
             include_str!("../uploads/queue.rs"),
-            // `enqueue`, `pause`, `resume` and `cancel` are a person's, `enqueue_work` and
-            // `next_transfers` are work; these observe the queue, record what the work
+            // `enqueue`, `pause`, `resume` and `cancel` are a person's, `enqueue_work`,
+            // `cancel_work` and `next_transfers` are work; these observe the queue, record what the work
             // finished, or clean up for the backup and the archive service.
             &[
                 "new",
@@ -519,7 +535,7 @@ fn every_public_call_asks_the_lock_or_is_listed_as_ungated() {
             "{file}: the public functions that do not ask the lock"
         );
     }
-    assert_eq!(gated, 103, "the public functions that ask the lock");
+    assert_eq!(gated, 104, "the public functions that ask the lock");
 }
 
 /// Every `pub fn` and `pub async fn` of one source file, free or in an `impl`, with its body.
@@ -626,7 +642,7 @@ fn no_public_entry_point_reaches_the_ungated_internals_without_asking_the_lock()
     assert!(files.len() >= 40, "{} source files", files.len());
     assert!(walked >= 300, "{walked} public functions");
     assert_eq!(
-        asking, 92,
+        asking, 93,
         "public entry points that reach an ungated internal and ask the lock"
     );
 }

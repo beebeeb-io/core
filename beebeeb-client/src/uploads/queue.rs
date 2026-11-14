@@ -510,8 +510,19 @@ impl UploadService {
         Ok(changed)
     }
 
+    /// Cancels an upload because a person chose to: refused on a locked screen. The work
+    /// cancels its own with [`Self::cancel_work`].
     pub fn cancel(&self, id: i64, now_ms: i64) -> Result<SignOutPlan, UploadServiceError> {
         self.client.person_call(crate::LockedAction::MutateFiles)?;
+        self.cancel_inner(id, now_ms)
+    }
+
+    /// Cancels an upload the work queued itself ([`Self::enqueue_work`]) and no longer wants,
+    /// such as a synced file that was removed or replaced before it was sent. Work: it runs
+    /// on a locked screen and not on a closed vault. Never for a person's cancel in the
+    /// window ([`Self::cancel`]); which of the two a host calls is the host's word.
+    pub fn cancel_work(&self, id: i64, now_ms: i64) -> Result<SignOutPlan, UploadServiceError> {
+        self.client.work_call()?;
         self.cancel_inner(id, now_ms)
     }
 

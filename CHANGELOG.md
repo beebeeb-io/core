@@ -34,10 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`flows::closed_vault_allows`). Now also asked: the new device's device-link calls and
   `cancel_recovery` (refused on a locked screen), `UploadService::pause` / `resume` / `cancel`,
   `BackupService::configure` / `back_up_again`. A start that puts a saved backup choice back uses the
-  new `BackupService::configure_saved`. A password change sets its new credentials only while the
+  new `BackupService::configure_saved` (also on the UniFFI `BackupServiceHandle`); the work cancels an
+  upload it queued with the new `UploadService::cancel_work`. A password change sets its new credentials only while the
   session it started with is still the one in the process. The UniFFI error has two new cases,
   `ScreenLocked` and `VaultClosed` (a closed vault is no longer reported as `SessionExpired`); a host
-  never removes the stored session on either.
+  never removes the stored session on either. They are reported for every service call: a `ClientError`
+  inside a service's own error (uploads, downloads, files, thumbnails, contacts, settings, sync,
+  archives, file provider, shares, devices) is now mapped like a bare one, where it used to read as
+  `Unavailable`; so an ended session raised through those calls now reads `SessionExpired` too.
 - `lock_screen` asked for while an install holds the app closed (a password change or a strong unlock
   between its proof and its install) is still refused there, and is no longer lost: that install
   brings the app back `ScreenLocked`.

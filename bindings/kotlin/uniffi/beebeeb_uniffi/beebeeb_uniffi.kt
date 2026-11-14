@@ -1558,6 +1558,8 @@ external fun uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_back_up_a
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_configure(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_configure_saved(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_events(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_next_batch(
@@ -2699,6 +2701,8 @@ external fun uniffi_beebeeb_uniffi_fn_method_backupservicehandle_assets_changed(
 external fun uniffi_beebeeb_uniffi_fn_method_backupservicehandle_back_up_again(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_method_backupservicehandle_configure(`ptr`: Long,`configuration`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_backupservicehandle_configure_saved(`ptr`: Long,`configuration`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_beebeeb_uniffi_fn_method_backupservicehandle_events(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
@@ -4505,7 +4509,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_back_up_again() != 28592.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_configure() != 38428.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_configure() != 50289.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_configure_saved() != 13958.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_backupservicehandle_events() != 53248.toShort()) {
@@ -9006,7 +9013,18 @@ public interface BackupServiceHandleInterface {
      */
     fun `backUpAgain`()
     
+    /**
+     * Sets where and how this device backs up: a person's choice now, refused on a locked
+     * screen. At a start of the app, put the saved choice back with `configure_saved`.
+     */
     fun `configure`(`configuration`: BackupConfigurationData)
+    
+    /**
+     * Puts back the configuration a person chose earlier, at a start of the app: it runs on a
+     * locked screen, so the backup keeps working there. Refused on a closed vault (call it
+     * again after the unlock). Never for a choice made now.
+     */
+    fun `configureSaved`(`configuration`: BackupConfigurationData)
     
     fun `events`(): BackupEventStreamHandle
     
@@ -9152,11 +9170,33 @@ open class BackupServiceHandle: Disposable, AutoCloseable, BackupServiceHandleIn
     
 
     
+    /**
+     * Sets where and how this device backs up: a person's choice now, refused on a locked
+     * screen. At a start of the app, put the saved choice back with `configure_saved`.
+     */
     @Throws(ServiceException::class)override fun `configure`(`configuration`: BackupConfigurationData)
         = 
     callWithHandle {
     uniffiRustCallWithError(ServiceException) { _status ->
     UniffiLib.uniffi_beebeeb_uniffi_fn_method_backupservicehandle_configure(
+        it,
+        FfiConverterTypeBackupConfigurationData.lower(`configuration`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Puts back the configuration a person chose earlier, at a start of the app: it runs on a
+     * locked screen, so the backup keeps working there. Refused on a closed vault (call it
+     * again after the unlock). Never for a choice made now.
+     */
+    @Throws(ServiceException::class)override fun `configureSaved`(`configuration`: BackupConfigurationData)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(ServiceException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_backupservicehandle_configure_saved(
         it,
         FfiConverterTypeBackupConfigurationData.lower(`configuration`),_status)
 }
@@ -41382,6 +41422,27 @@ sealed class ServiceException: kotlin.Exception() {
             get() = "code=${ `code` }"
     }
     
+    /**
+     * The app is locked on this device and the call is one a person drives: core refused
+     * it before anything was sent. The stored session is untouched; unlock, then retry.
+     */
+    class ScreenLocked(
+        ) : ServiceException() {
+        override val message
+            get() = ""
+    }
+    
+    /**
+     * The vault is closed: the work is stopped, and a person can only prove the account
+     * password, lock or sign out. Not an expired session: never remove the stored session
+     * on this answer.
+     */
+    class VaultClosed(
+        ) : ServiceException() {
+        override val message
+            get() = ""
+    }
+    
 
     
 
@@ -41435,6 +41496,8 @@ public object FfiConverterTypeServiceError : FfiConverterRustBuffer<ServiceExcep
             23 -> ServiceException.ShareRefused(
                 FfiConverterString.read(buf),
                 )
+            24 -> ServiceException.ScreenLocked()
+            25 -> ServiceException.VaultClosed()
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -41539,6 +41602,14 @@ public object FfiConverterTypeServiceError : FfiConverterRustBuffer<ServiceExcep
                 4UL
                 + FfiConverterString.allocationSize(value.`code`)
             )
+            is ServiceException.ScreenLocked -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
+            is ServiceException.VaultClosed -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+            )
         }
     }
 
@@ -41642,6 +41713,14 @@ public object FfiConverterTypeServiceError : FfiConverterRustBuffer<ServiceExcep
                 FfiConverterString.write(value.`code`, buf)
                 Unit
             }
+            is ServiceException.ScreenLocked -> {
+                buf.putInt(24)
+                Unit
+            }
+            is ServiceException.VaultClosed -> {
+                buf.putInt(25)
+                Unit
+            }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 
@@ -41674,7 +41753,9 @@ enum class ServiceErrorKind {
     DELETION_ALREADY_SCHEDULED,
     SUBSCRIPTION_ACTIVE,
     EMAIL_NOT_SENT,
-    SHARE_REFUSED;
+    SHARE_REFUSED,
+    SCREEN_LOCKED,
+    VAULT_CLOSED;
 
     
 

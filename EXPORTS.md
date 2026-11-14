@@ -208,6 +208,10 @@ so only development and test files are affected.
 | `DeviceLinkQr` | `parse` of `beebeeb-link:v1:` (session id, fingerprint) | `parse` of `beebeeb-link:v2:` (session id, fingerprint, canonical device name); `device_name()`, `matches_relayed_name(name)`; a `v1` payload is refused |
 | `seal_for_new_device` | `(qr, relayed_public_key, typed_code, material)` | `(qr, relayed_public_key, relayed_device_name, typed_code, material)`: a relayed name that differs from the scanned one is refused before anything is sealed |
 | `beebeeb_client::devices::DeviceError::DeviceNameChanged` | none | QR path: the relay's name differs from the scanned one; the link is denied |
+| UniFFI `ServiceError` / `ServiceErrorKind` | a closed vault read `SessionExpired`, a locked screen `Unavailable` | new cases `ScreenLocked` (`screen_locked`) and `VaultClosed` (`vault_closed`); a host never removes the stored session on either. A `ClientError` inside a service's own error is mapped like a bare one, so these two, and an ended session, are reported for every service call |
+| UniFFI `BackupServiceHandle.configure_saved` | none | puts a saved backup choice back at a start of the app (work: runs on a locked screen); `configure` is a person's choice now and is refused there |
+| `beebeeb_client::backup::BackupService::configure_saved`, `beebeeb_client::uploads::UploadService::cancel_work` | none | the work's twins of `configure` and `cancel`, which now ask the lock as a person's calls |
+| `beebeeb_client::Client::lock_screen` | a request made while an install held the app closed was lost | still refused there, and applied by that install: the app comes back `ScreenLocked` |
 
 ## Verifying a release
 

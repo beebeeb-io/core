@@ -206,7 +206,7 @@ Secrets, input and bindings:
   `set_session` reads the lock and installs in one hold. A screen lock asked for while an install
   holds the app closed is taken and recorded in one hold with the lock (`ask_screen_lock`) and applied
   by the install of that generation, never counted outside it. Who drives a work call is the host's word:
-  `enqueue_work`, `configure_saved` and the file provider's calls are never used for the window; the list is in `docs/agent-notes.md`, "What the screen lock
+  `enqueue_work`, `cancel_work`, `configure_saved` and the file provider's calls are never used for the window; the list is in `docs/agent-notes.md`, "What the screen lock
   refuses", and `tests_svc_auth/lock_gate.rs` walks the sources for it.
 
 Transfers:

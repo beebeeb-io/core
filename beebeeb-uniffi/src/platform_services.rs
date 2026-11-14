@@ -431,9 +431,20 @@ impl BackupEventStreamHandle {
 
 #[uniffi::export]
 impl BackupServiceHandle {
+    /// Sets where and how this device backs up: a person's choice now, refused on a locked
+    /// screen. At a start of the app, put the saved choice back with `configure_saved`.
     pub fn configure(&self, configuration: BackupConfigurationData) -> Result<(), ServiceError> {
         self.service
             .configure(backup_configuration(configuration)?)
+            .map_err(map_client_error)
+    }
+
+    /// Puts back the configuration a person chose earlier, at a start of the app: it runs on a
+    /// locked screen, so the backup keeps working there. Refused on a closed vault (call it
+    /// again after the unlock). Never for a choice made now.
+    pub fn configure_saved(&self, configuration: BackupConfigurationData) -> Result<(), ServiceError> {
+        self.service
+            .configure_saved(backup_configuration(configuration)?)
             .map_err(map_client_error)
     }
 
