@@ -563,8 +563,17 @@ check record and wrong-try rule `beebeeb_core::screen_lock`, and the service on 
   lock or a sign-out that landed at any point since, also between the last answer and that step, wins
   (`StaleAccount`, no key is proven or loaded again, the old check record is deleted because the server
   has changed the password). The condition is the generation, never the state name: a host that never
-  starts the lock stays `SignedOut` throughout. A screen lock asked for while the change holds the app
-  closed is refused there (a closed vault is never screen-locked) and applied when the change installs.
+  starts the lock stays `SignedOut` throughout.
+- **A screen lock asked for while an install holds the app closed is not lost.** Between the step that
+  sets an install's credentials and the install itself (a password change, a strong unlock, a new-device
+  or recovered install) the app reads `VaultClosed`, and a closed vault is never screen-locked, so
+  `lock_screen` is refused there. The request is kept: `Client::ask_screen_lock` moves the lock and, when
+  it is refused on a closed app, records the request for the account generation it was asked at, in ONE
+  hold of the session and lock mutexes; `install_session_at` applies it in its own hold when it installs
+  that generation, and the app comes back `ScreenLocked`. Never count or record a lock request outside
+  that hold (a request that raced an install was lost that way). A request refused before the
+  credentials were set belongs to an older generation and is dropped: that install is the newer and
+  stronger proof.
 - **`Client::set_session`** reads the lock and installs in one hold too, and a lock that cannot be read
   refuses it (`ClientError::State`).
 - **A recovery install** is for the account generation it starts at, not the one its recovery was

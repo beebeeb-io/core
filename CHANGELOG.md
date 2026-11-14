@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session it started with is still the one in the process. The UniFFI error has two new cases,
   `ScreenLocked` and `VaultClosed` (a closed vault is no longer reported as `SessionExpired`); a host
   never removes the stored session on either.
+- `lock_screen` asked for while an install holds the app closed (a password change or a strong unlock
+  between its proof and its install) is still refused there, and is no longer lost: that install
+  brings the app back `ScreenLocked`.
 - A password change and the strong installs (`unlock_known_device`, `install_new_device`,
   `install_recovered_session`) install only for the session they proved: a vault lock or a sign-out
   that lands after their credentials were set (for a recovery: after its install began) wins and the
