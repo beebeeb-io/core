@@ -63,7 +63,11 @@ impl LockFlow {
         let state = if !facts.session_stored {
             LockState::SignedOut
         } else if facts.ask_password_at_start == Some(false) && facts.vault_closed == Some(false) {
-            LockState::ScreenLocked // STUB: today's start ignores app lock
+            if facts.app_lock == Some(false) {
+                LockState::Open
+            } else {
+                LockState::ScreenLocked
+            }
         } else {
             LockState::VaultClosed
         };
@@ -97,9 +101,9 @@ impl LockFlow {
     /// changes. From any other state nothing changes either, so a host may call it whenever
     /// its timer fires, without an answer to handle.
     pub fn lock_after_away(&mut self, app_lock: Option<bool>) {
-        // STUB: today the host's only lock is `lock(Screen)`, whatever app lock says.
-        let _ = app_lock;
-        let _ = self.lock(LockLevel::Screen);
+        if self.state == LockState::Open && away_locks_screen(app_lock) {
+            self.state = LockState::ScreenLocked;
+        }
     }
 
     /// The host states that the operating system verified the user. Core cannot check it, so
@@ -236,9 +240,11 @@ pub enum ScreenProof {
 /// for this change; without one it is `StepOutOfOrder` (the proof comes first). The unlock
 /// that opened the app earlier is not that proof, and a host never keeps a proof for later.
 pub const fn app_lock_may_change(state: LockState, on: bool, proof: Option<ScreenProof>) -> Result<(), FlowError> {
-    // STUB: today no rule guards the setting.
-    let _ = (state, on, proof);
-    Ok(())
+    match (state, on, proof) {
+        (LockState::Open, true, _) | (LockState::Open, false, Some(_)) => Ok(()),
+        (LockState::Open, false, None) => Err(FlowError::StepOutOfOrder),
+        (LockState::SignedOut | LockState::ScreenLocked | LockState::VaultClosed, _, _) => Err(FlowError::NotReady),
+    }
 }
 
 #[cfg(test)]

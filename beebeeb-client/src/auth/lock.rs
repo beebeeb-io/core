@@ -79,8 +79,7 @@ impl Client {
             // A mark that cannot be written leaves this process closed all the same.
             let _ = write_lock_flag(store, LOCK_VAULT_CLOSED, true);
         }
-        let _ = key_may_be_loaded; // STUB: today only a screen-locked start loads the key
-        if let (LockState::ScreenLocked, Some(owner)) = (flow.state(), owner.as_deref()) {
+        if let (true, Some(owner)) = (key_may_be_loaded(flow.state()), owner.as_deref()) {
             match Session::load_for_user_proven(store, owner, self.app_id())? {
                 Some(session) => {
                     self.install_session(&session)?;
@@ -115,8 +114,7 @@ impl Client {
     /// from a screen-locked, closed or signed-out app nothing changes, so a host may call it
     /// whenever its timer fires. The answer is the state after.
     pub fn lock_after_away(&self, store: &dyn SecretStore) -> Result<LockState, AuthError> {
-        if true {
-            // STUB: today the host's only lock is `lock_screen`, whatever app lock says.
+        if away_locks_screen(read_lock_setting(store, LOCK_APP_LOCK, true)) {
             // A refusal (closed or signed out) changes nothing; a screen lock asked for while
             // an install holds the app closed is kept and applied when that install lands.
             let _ = self.ask_screen_lock()?;
