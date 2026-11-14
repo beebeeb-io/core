@@ -410,6 +410,12 @@ Replaced in the desktop engine once the native sign-in/unlock binding has merged
   the Windows user-verification prompt, or asks for the password, for that change). The host keeps the
   chosen delay and its own idle timer; when the delay has passed, and when Windows locks the session,
   it calls `lock_after_away` (never `lock_screen`, which is "Lock now" by hand only).
+- `start_from_store` can answer `Open` (app lock off): the start shows the account at once, with the
+  key loaded and sync started, as after an unlock.
+- Known limit: the delay lives in the host and core does not gate it. The delay offers no "never": a
+  host that let it run forever would be app lock off without the proof. The switch is the only way off.
+- With `ClientConfig::lock_password_path` off, only platform verification can turn app lock off (the
+  password proof answers `PasswordCheckUnavailable`).
 - `begin_hello` / `cancel_hello` (today an immediate refusal): bound to the Windows user-verification
   prompt for the app's window, then `unlock_screen_platform_verified`.
 - The engine's own credential-store module becomes the Windows `SecretStore` implementation.
@@ -454,7 +460,7 @@ the data on the server and in transit.
 - Client: start with the setting on or the mark set reads the key entry 0 times; lock vault, quit, start:
   still closed; after `lock_vault` every outstanding key copy is refused and work has stopped; online
   beats a stale record; a counter mismatch and an ended session delete the record; both purge places
-  remove all four entries; the strong unlock still works after the server forgot the device's hardware
+  remove all five entries; the strong unlock still works after the server forgot the device's hardware
   identity in a password change.
 - Desktop: the frames of section 7 on a real Windows build, with a Hello prompt and with Hello absent.
 

@@ -92,8 +92,9 @@ impl Client {
         Ok(state)
     }
 
-    /// Locks the screen level by hand, by host policy or with the OS session. The key and
-    /// the work stay as they are.
+    /// Locks the screen level by hand ("Lock now"), whatever app lock says. The key and the
+    /// work stay as they are. Every lock the host applies by itself (the away delay, the OS
+    /// session lock) is [`Client::lock_after_away`], never this call.
     ///
     /// A closed vault is never screen-locked, so the call is refused there. One case keeps
     /// the request all the same: while an install is on its way (a password change between
