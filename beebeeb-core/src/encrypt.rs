@@ -1212,7 +1212,7 @@ pub fn encrypt_chunk_raw(key: &FileKey, plaintext: &[u8]) -> Result<Vec<u8>, Cor
 
 /// Shared raw seal: `nonce(12) || AES-256-GCM(key, nonce, plaintext, aad)`.
 /// An empty `aad` is byte-identical to the v1 (no-AAD) frame.
-pub(crate) fn seal_raw_with_aad(key: &FileKey, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, CoreError> {
+pub fn seal_raw_with_aad(key: &FileKey, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, CoreError> {
     seal_raw_with_nonce(key, &random_nonce(), plaintext, aad)
 }
 
@@ -1258,7 +1258,7 @@ pub(crate) fn seal_raw_with_nonce(
 /// aes-gcm 0.10.3 verifies the tag BEFORE applying the keystream, so a failed
 /// open (wrong key, wrong AAD, tampered bytes) never materialises plaintext —
 /// which is what makes trial opens (v2 then v1, last=0 then last=1) safe.
-pub(crate) fn open_raw_with_aad(key: &FileKey, raw: &[u8], aad: &[u8]) -> Result<Vec<u8>, CoreError> {
+pub fn open_raw_with_aad(key: &FileKey, raw: &[u8], aad: &[u8]) -> Result<Vec<u8>, CoreError> {
     if raw.len() < NONCE_LEN + TAG_LEN {
         return Err(CoreError::Decryption);
     }
