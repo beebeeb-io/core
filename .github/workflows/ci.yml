@@ -7,6 +7,7 @@ on:
     branches: [main]
   # Every base branch, not only main: a PR stacked on a feature branch gets CI too (task 2381).
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 # A new push to a PR cancels that PR's older run. Every other run (a push to main) gets a group of its own,
 # its run id, so it is never cancelled, and never dropped while it waits either (a group keeps ONE pending
@@ -21,6 +22,7 @@ env:
 
 jobs:
   check:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Check, Clippy & Format
     runs-on: ubuntu-latest
     permissions:
@@ -133,6 +135,7 @@ jobs:
         run: python3 -I test-vectors/tools/make_cli_auth_vectors.py --self-test beebeeb-core/tests/cli_auth_vectors.rs
 
   test:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Tests
     runs-on: ubuntu-latest
     permissions:
@@ -161,6 +164,7 @@ jobs:
   # (#74 round 8): every crate and target must build on Windows, and the crates with platform file code
   # (the trusted publish path in core, used by client and transfer) run their tests there too.
   windows:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Windows build & tests
     runs-on: windows-latest
     permissions:
@@ -183,6 +187,7 @@ jobs:
         run: cargo test --locked --no-fail-fast -p beebeeb-core -p beebeeb-client -p beebeeb-transfer
 
   dependencies:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Dependency advisories, licenses & sources
     runs-on: ubuntu-latest
     permissions:
@@ -207,6 +212,7 @@ jobs:
 
   # Exercise the generated JavaScript and TypeScript surface in a real JS engine.
   wasm-js:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: WASM JS surface
     runs-on: ubuntu-latest
     permissions:
@@ -234,6 +240,7 @@ jobs:
         run: beebeeb-wasm/js-tests/run.sh
 
   claims-guard:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Claims guard
     runs-on: ubuntu-latest
     permissions:
@@ -261,6 +268,7 @@ jobs:
   # Two copies of the binding live in the tree (beebeeb-uniffi/bindings/ and
   # bindings/kotlin/); both are compiled.
   kotlin-bindings:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Kotlin bindings compile
     runs-on: ubuntu-latest
     permissions:
@@ -319,6 +327,7 @@ jobs:
   # `swiftc -typecheck` exits non-zero on any type error, duplicate definition,
   # or unresolved import — without producing a binary, keeping the job fast.
   swift-bindings:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Swift bindings typecheck
     runs-on: macos-latest
     permissions:
