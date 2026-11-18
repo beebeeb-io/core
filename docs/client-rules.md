@@ -70,6 +70,17 @@ The secret store keeps `session.owner`, `session.master_key`, `session.api_url`,
 out one app removes only its token; whole-device sign-out goes through `ServiceCoordinator` so work,
 caches, account rows, directories, tokens, and shared key state are removed in order.
 
+## Local seals (desktop office editor)
+
+`beebeeb_core::local_seal` seals the unsaved-document recovery snapshot and the per-session scratch files of
+the desktop office editor. It is desktop-only and linked directly from Rust: it is not in `beebeeb-uniffi` or
+`beebeeb-wasm`, and no key bytes cross an FFI boundary. A client calls `seal_recovery_snapshot` /
+`open_recovery_snapshot` and `ScratchWriter` / `ScratchReader` / `verify_scratch`; it never builds the key,
+labels, AAD or framing itself. The engine owns the file work (atomic replace, single-instance cleanup, deleting
+a snapshot only after the server confirmed the save, dropping the `ScratchKey` and its files on sign-out, account
+switch and lock) as written in `docs/superpowers/specs/2026-11-18-local-snapshot-and-scratch-seal.md`. A
+consumer of a scratch stream uses none of it until a full read ended in `Ok`.
+
 ## Web transport exception
 
 Web may use `fetch` for plain API transport with core-defined request and response types, and may use
