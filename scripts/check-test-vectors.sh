@@ -55,4 +55,9 @@ cmp beebeeb-core/src/name_tag/case_fold.rs "$vector_tmp/case_fold.rs"
 python3 "$vector_tmp/test-vectors/tools/make_screen_lock_vectors.py" --check test-vectors/screen_lock.json
 python3 "$vector_tmp/test-vectors/tools/make_screen_lock_vectors.py" --self-test test-vectors/screen_lock.json
 
+# The local-seal vectors (recovery snapshot and scratch stream): an independent HKDF / AES-GCM
+# implementation of the design note must write the committed file byte for byte, and its check must be able to go red.
+python3 "$vector_tmp/test-vectors/tools/make_local_seal_vectors.py" --check test-vectors/local_seal.json
+python3 "$vector_tmp/test-vectors/tools/make_local_seal_vectors.py" --self-test test-vectors/local_seal.json
+
 echo "all test-vector Python tools passed; generated files are unchanged"
