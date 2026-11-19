@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `beebeeb_core::webauthn_cred`: WebAuthn credential primitives for a passkey provider: P-256 keypair (private
+  scalar as zeroizing bytes), ES256 signing over `authenticatorData || clientDataHash` (DER), the COSE_Key
+  encoding of the public key, and verification. Enables the `ecdsa` feature of the existing `p256` dependency
+  (no new lockfile package); no stored format changes.
 - The two-level lock for native apps (contract: `docs/superpowers/specs/2026-11-13-two-level-lock-design.md`):
   `beebeeb_api::flows::LockFlow`, `beebeeb_core::screen_lock` (the offline check record and the
   wrong-try rule) and the `beebeeb-client` calls `start_from_store`, `lock_state`, `lock_screen`,

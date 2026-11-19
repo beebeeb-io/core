@@ -61,6 +61,7 @@ pub mod system_folders;
 pub mod test_vectors_v2;
 pub mod thumbnail;
 pub mod transfer;
+pub mod webauthn_cred;
 pub mod zip;
 
 pub use error::CoreError;
