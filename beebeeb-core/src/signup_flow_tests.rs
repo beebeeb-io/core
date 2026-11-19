@@ -180,6 +180,8 @@ fn full_signup_against_a_mock_server() {
     let body = req.body.unwrap();
     let upload = b64().decode(body["client_message"].as_str().unwrap()).unwrap();
     opaque_protocol::server_registration_finish(&upload).unwrap();
+    // The accepted terms version travels in the register-finish body (the server requires it).
+    assert_eq!(body["terms_version"], "2026-10");
     assert_eq!(
         b64().decode(body["x25519_public_key"].as_str().unwrap()).unwrap().len(),
         32
