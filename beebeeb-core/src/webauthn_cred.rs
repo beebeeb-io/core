@@ -7,14 +7,19 @@
 //!   returned DER-encoded as WebAuthn requires. `s` is not normalised: WebAuthn does not require low-s.
 //! - **COSE_Key** (RFC 9052, CTAP2 canonical form): `{1: 2, 3: -7, -1: 1, -2: x, -3: y}`, 77 bytes.
 //!
-//! No stored format changes; nothing here is read from or written to a file or the server.
+//! - **Stored private key:** PKCS#8 `PrivateKeyInfo` DER whose `ECPrivateKey` carries only the scalar
+//!   (a fixed 35-byte header, then the 32 bytes), base64 in the vault item. The public key leaves as
+//!   `SubjectPublicKeyInfo` DER (a fixed 26-byte header, then the 65 SEC1 bytes). Both are read strictly:
+//!   only the exact form written here opens. Every copy of the scalar and of its DER is wiped on drop.
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use p256::ecdsa::signature::{Signer, Verifier};
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use p256::elliptic_curve::Generate;
 use p256::elliptic_curve::sec1::ToSec1Point;
 use p256::{NonZeroScalar, PublicKey, SecretKey};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::error::CoreError;
 
@@ -29,6 +34,25 @@ pub const COSE_KEY_LEN: usize = 77;
 const COSE_HEAD: [u8; 10] = [0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20];
 /// `-3:` bytes(32), between the x and y coordinates.
 const COSE_Y_HEAD: [u8; 3] = [0x22, 0x58, 0x20];
+
+/// DER `SubjectPublicKeyInfo` header for an uncompressed P-256 key (the 65 SEC1 bytes follow).
+const SPKI_P256_HEAD: [u8; 26] = [
+    0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce,
+    0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
+];
+/// PKCS#8 `PrivateKeyInfo` header for a P-256 key whose `ECPrivateKey` carries only the scalar (the 32
+/// bytes follow).
+const PKCS8_P256_HEAD: [u8; 35] = [
+    0x30, 0x41, 0x02, 0x01, 0x00, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a,
+    0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x04, 0x27, 0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20,
+];
+
+/// Length of the PKCS#8 DER written by [`CredentialKey::to_pkcs8_der`].
+pub const PKCS8_DER_LEN: usize = PKCS8_P256_HEAD.len() + 32;
+/// Length of the SPKI DER written by [`CredentialKey::public_key_spki_der`].
+pub const SPKI_DER_LEN: usize = SPKI_P256_HEAD.len() + 65;
+/// Length of the padded standard base64 of the PKCS#8 DER.
+const PKCS8_B64_LEN: usize = PKCS8_DER_LEN.div_ceil(3) * 4;
 
 /// A P-256 credential keypair.
 pub struct CredentialKey {
@@ -58,8 +82,57 @@ impl CredentialKey {
     /// The private scalar, wiped on drop.
     pub fn to_secret_bytes(&self) -> Zeroizing<[u8; 32]> {
         let mut out = Zeroizing::new([0u8; 32]);
-        out.copy_from_slice(&self.key.to_bytes());
+        let mut bytes = self.key.to_bytes();
+        out.copy_from_slice(&bytes);
+        bytes.as_mut_slice().zeroize();
         out
+    }
+
+    /// The private key as PKCS#8 DER (67 bytes: the fixed header, then the scalar), wiped on drop.
+    pub fn to_pkcs8_der(&self) -> Zeroizing<Vec<u8>> {
+        let mut der = Zeroizing::new(Vec::with_capacity(PKCS8_DER_LEN));
+        der.extend_from_slice(&PKCS8_P256_HEAD);
+        der.extend_from_slice(&self.to_secret_bytes()[..]);
+        der
+    }
+
+    /// From the PKCS#8 DER that [`to_pkcs8_der`](Self::to_pkcs8_der) writes. Any other length, header
+    /// or scalar range is an error.
+    pub fn from_pkcs8_der(der: &[u8]) -> Result<Self, CoreError> {
+        if der.len() != PKCS8_DER_LEN || der[..PKCS8_P256_HEAD.len()] != PKCS8_P256_HEAD {
+            return Err(CoreError::InvalidInput("not a P-256 PKCS#8 private key".into()));
+        }
+        let mut scalar = Zeroizing::new([0u8; 32]);
+        scalar.copy_from_slice(&der[PKCS8_P256_HEAD.len()..]);
+        Self::from_secret_bytes(&scalar)
+    }
+
+    /// The PKCS#8 DER as padded standard base64 (92 characters), the form stored in a vault item. The
+    /// string is written into a buffer of its final size and wiped on drop.
+    pub fn to_pkcs8_base64(&self) -> Zeroizing<String> {
+        let mut out = Zeroizing::new(String::with_capacity(PKCS8_B64_LEN));
+        STANDARD.encode_string(&self.to_pkcs8_der()[..], &mut out);
+        out
+    }
+
+    /// From the base64 that [`to_pkcs8_base64`](Self::to_pkcs8_base64) writes. The decoded DER is
+    /// wiped before this returns.
+    pub fn from_pkcs8_base64(b64: &str) -> Result<Self, CoreError> {
+        let bad = || CoreError::InvalidInput("not a P-256 PKCS#8 private key".into());
+        if b64.len() != PKCS8_B64_LEN {
+            return Err(bad());
+        }
+        let mut der = Zeroizing::new([0u8; PKCS8_B64_LEN / 4 * 3]);
+        let n = STANDARD.decode_slice(b64, &mut der[..]).map_err(|_| bad())?;
+        Self::from_pkcs8_der(&der[..n])
+    }
+
+    /// The public key as `SubjectPublicKeyInfo` DER (91 bytes), what WebAuthn's `getPublicKey()` returns.
+    pub fn public_key_spki_der(&self) -> Vec<u8> {
+        let mut der = Vec::with_capacity(SPKI_DER_LEN);
+        der.extend_from_slice(&SPKI_P256_HEAD);
+        der.extend_from_slice(&self.public_key_sec1());
+        der
     }
 
     /// The SEC1-uncompressed public key (`0x04 || X || Y`, 65 bytes).
@@ -231,6 +304,55 @@ mod tests {
         let mut compressed = key().public_key_sec1();
         compressed[0] = 0x02;
         assert!(cose_public_key(&compressed).is_err());
+    }
+
+    #[test]
+    fn pkcs8_and_spki_known_bytes() {
+        // The bytes the Pass crate wrote before the wrap moved here (pass 419195f).
+        let scalar: [u8; 32] = std::array::from_fn(|i| i as u8 + 1);
+        let k = CredentialKey::from_secret_bytes(&scalar).unwrap();
+        let der = k.to_pkcs8_der();
+        let head = "3041020100301306072a8648ce3d020106082a8648ce3d030107042730250201010420";
+        assert_eq!(hex::encode(&der[..]), format!("{head}{}", hex::encode(scalar)));
+        assert_eq!(der.len(), PKCS8_DER_LEN);
+        let b64 = k.to_pkcs8_base64();
+        assert_eq!(
+            b64.as_str(),
+            "MEECAQAwEwYHKoZIzj0CAQYIKoZIzj0DAQcEJzAlAgEBBCABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fIA=="
+        );
+        assert_eq!(b64.capacity(), b64.len(), "written into a buffer of its final size");
+        assert_eq!(STANDARD.decode(b64.as_str()).unwrap(), der[..]);
+        let again = CredentialKey::from_pkcs8_base64(&b64).unwrap();
+        assert_eq!(again.public_key_sec1(), k.public_key_sec1());
+        assert_eq!(*CredentialKey::from_pkcs8_der(&der).unwrap().to_secret_bytes(), scalar);
+
+        let spki = key().public_key_spki_der();
+        assert_eq!(spki.len(), SPKI_DER_LEN);
+        assert_eq!(
+            hex::encode(&spki),
+            format!("3059301306072a8648ce3d020106082a8648ce3d03010703420004{UX}{UY}")
+        );
+    }
+
+    #[test]
+    fn pkcs8_open_is_strict() {
+        let k = key();
+        let der = k.to_pkcs8_der();
+        assert!(CredentialKey::from_pkcs8_der(&der[..66]).is_err());
+        let mut long = der.to_vec();
+        long.push(0);
+        assert!(CredentialKey::from_pkcs8_der(&long).is_err());
+        let mut head = der.to_vec();
+        head[1] ^= 1;
+        assert!(CredentialKey::from_pkcs8_der(&head).is_err());
+        let mut zero = der.to_vec();
+        zero[35..].fill(0);
+        assert!(CredentialKey::from_pkcs8_der(&zero).is_err());
+        let b64 = k.to_pkcs8_base64();
+        assert!(CredentialKey::from_pkcs8_base64(&b64[..88]).is_err());
+        assert!(CredentialKey::from_pkcs8_base64(&b64.replace('=', "")).is_err());
+        assert!(CredentialKey::from_pkcs8_base64(&format!("{}!===", &b64[..88])).is_err());
+        assert!(CredentialKey::from_pkcs8_base64("").is_err());
     }
 
     #[test]

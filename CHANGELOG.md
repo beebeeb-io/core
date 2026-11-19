@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `beebeeb_core::pair_kdf`: the key schedule of the Beebeeb Pass browser pairing, moved out of the Pass crate
+  byte for byte (known-answer tests pin it): the account tag, the commit, the HKDF schedule for the code, the
+  pair key and the MAC key, the HMAC key confirmation, and the per-direction channel keys. The labels are the
+  ones Pass already used and are listed in `label_table_tests.rs`.
+- `webauthn_cred::CredentialKey`: `to_pkcs8_der` / `from_pkcs8_der`, `to_pkcs8_base64` / `from_pkcs8_base64`
+  (the stored form of a Pass passkey, zeroizing, read strictly) and `public_key_spki_der`. `to_secret_bytes`
+  now wipes its intermediate copy of the scalar.
 - `beebeeb_core::webauthn_cred`: WebAuthn credential primitives for a passkey provider: P-256 keypair (private
   scalar as zeroizing bytes), ES256 signing over `authenticatorData || clientDataHash` (DER), the COSE_Key
   encoding of the public key, and verification. Enables the `ecdsa` feature of the existing `p256` dependency
