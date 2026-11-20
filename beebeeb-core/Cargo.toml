@@ -10,7 +10,7 @@ beebeeb-types = { path = "../beebeeb-types" }
 aes-gcm = { version = "0.10", features = ["zeroize"] }
 base64 = "0.23"
 argon2 = { version = "0.5", features = ["zeroize"] }
-rand = "0.8"
+rand = "0.10"
 hkdf = "0.12"
 # HMAC-SHA256 for the new-item-id resume tag (task 2275 L13). Same crate version
 # hkdf already depends on, so the lockfile gains no new package.
