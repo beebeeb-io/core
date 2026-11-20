@@ -15,7 +15,7 @@ on:
 jobs:
   advisories:
     name: Dependency advisories
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ci]
     permissions:
       contents: read
     continue-on-error: ${{ github.event_name == 'pull_request' }}
