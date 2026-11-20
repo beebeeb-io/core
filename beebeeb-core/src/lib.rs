@@ -36,6 +36,7 @@ pub mod onboarding;
 pub mod opaque;
 pub mod opaque_protocol;
 pub mod owned_keys;
+pub mod pair_kdf;
 pub mod passkey;
 pub mod passkey_seal;
 pub mod path_safety;
@@ -61,6 +62,7 @@ pub mod system_folders;
 pub mod test_vectors_v2;
 pub mod thumbnail;
 pub mod transfer;
+pub mod webauthn_cred;
 pub mod zip;
 
 pub use error::CoreError;
