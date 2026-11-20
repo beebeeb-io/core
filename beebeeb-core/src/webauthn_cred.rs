@@ -110,9 +110,16 @@ impl CredentialKey {
     /// The PKCS#8 DER as padded standard base64 (92 characters), the form stored in a vault item. The
     /// string is written into a buffer of its final size and wiped on drop.
     pub fn to_pkcs8_base64(&self) -> Zeroizing<String> {
-        let mut out = Zeroizing::new(String::with_capacity(PKCS8_B64_LEN));
-        STANDARD.encode_string(&self.to_pkcs8_der()[..], &mut out);
-        out
+        // `encode_slice` writes straight into the final buffer; `encode_string` would stage the
+        // base64 of the private key in a 1024-byte stack chunk that is never wiped.
+        let mut buf = Zeroizing::new(vec![0u8; PKCS8_B64_LEN]);
+        let n = STANDARD
+            .encode_slice(&self.to_pkcs8_der()[..], &mut buf[..])
+            .expect("buffer holds the 92-character encoding");
+        debug_assert_eq!(n, PKCS8_B64_LEN);
+        // The bytes move into the String without a copy; the base64 alphabet is ASCII.
+        let bytes = std::mem::take(&mut *buf);
+        Zeroizing::new(String::from_utf8(bytes).expect("base64 is ASCII"))
     }
 
     /// From the base64 that [`to_pkcs8_base64`](Self::to_pkcs8_base64) writes. The decoded DER is
