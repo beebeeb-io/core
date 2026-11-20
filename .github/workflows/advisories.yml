@@ -15,12 +15,9 @@ on:
 jobs:
   advisories:
     name: Dependency advisories
-    runs-on: [self-hosted, ci]
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-    continue-on-error: ${{ github.event_name == 'pull_request' }}
-    env:
-      BB_WORKSPACE: ${{ vars.BB_WORKSPACE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -32,7 +29,16 @@ jobs:
         run: cargo install cargo-audit --locked --version 0.22.2
 
       - name: Check Cargo.lock against the advisory database
+        env:
+          EVENT: ${{ github.event_name }}
         run: |
-          set -euo pipefail
-          ws="${BB_WORKSPACE:-/opt/bb/workspace}"
-          "$ws/scripts/gate/advisory-check.sh" "$GITHUB_WORKSPACE/Cargo.lock"
+          set -uo pipefail
+          # Reads .cargo/audit.toml (ignores, each with a dated reason).
+          if cargo audit --file Cargo.lock; then
+            exit 0
+          fi
+          if [ "$EVENT" = "pull_request" ]; then
+            echo "::warning::cargo audit reported advisories (PR run warns only; the scheduled run fails)"
+            exit 0
+          fi
+          exit 1
