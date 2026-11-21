@@ -26,6 +26,7 @@ use crate::{Client, ClientError, SecretError, SecretStore, Session, session::Har
 
 mod account;
 mod install;
+pub mod kept_key;
 mod lock;
 mod lock_password;
 mod new_device;
