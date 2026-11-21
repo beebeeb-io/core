@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `beebeeb_core::local_seal` (design note `docs/superpowers/specs/2026-11-18-local-snapshot-and-scratch-seal.md`):
+  the recovery snapshot of an unsaved document (`seal_recovery_snapshot`, `open_recovery_snapshot`,
+  `peek_snapshot_meta`; AES-256-GCM under a key from the account key and the file id, bound to the file id,
+  base version, time and kind) and the per-session scratch stream (`ScratchKey`, `ScratchWriter`,
+  `ScratchReader`, `verify_scratch`; a random in-memory key, a per-file key, frames bound to header, position and
+  the final flag). Four new labels (`beebeeb-local-snapshot-v1`, `beebeeb-local-snapshot-aad-v1`,
+  `beebeeb-scratch-chunk-key-v1`, `beebeeb-scratch-chunk-aad-v1`), vectors in `test-vectors/local_seal.json`
+  written by `test-vectors/tools/make_local_seal_vectors.py`. Desktop only: not in the uniffi or wasm bindings.
 - `beebeeb_core::pair_kdf`: the key schedule of the Beebeeb Pass browser pairing, moved out of the Pass crate
   byte for byte (known-answer tests pin it): the account tag, the commit, the HKDF schedule for the code, the
   pair key and the MAC key, the HMAC key confirmation, and the per-direction channel keys. The labels are the

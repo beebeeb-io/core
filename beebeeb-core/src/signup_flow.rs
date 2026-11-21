@@ -572,17 +572,18 @@ impl SignupFlow {
         let email = self.email.clone().ok_or(SignupError::WrongState)?;
         let ticket = self.ticket.as_ref().ok_or(SignupError::TicketExpired)?;
         self.registering = Registering::Finishing;
-        Ok(HttpRequest::post(
-            REGISTER_FINISH_PATH,
-            json!({
-                "email": email,
-                "client_message": b64().encode(&finish.upload),
-                "x25519_public_key": b64().encode(finish.x25519_public),
-                "recovery_check": b64().encode(finish.recovery_check),
-                "signup_ticket": ticket.as_str(),
-            }),
-            RequestAuth::None,
-        ))
+        let mut body = json!({
+            "email": email,
+            "client_message": b64().encode(&finish.upload),
+            "x25519_public_key": b64().encode(finish.x25519_public),
+            "recovery_check": b64().encode(finish.recovery_check),
+            "signup_ticket": ticket.as_str(),
+        });
+        // The terms version the person accepted: the server requires it with the email code on.
+        if let (Some(version), Some(map)) = (self.policy.terms_version.as_ref(), body.as_object_mut()) {
+            map.insert("terms_version".to_string(), json!(version));
+        }
+        Ok(HttpRequest::post(REGISTER_FINISH_PATH, body, RequestAuth::None))
     }
 
     /// The account exists: the session and the master key for the caller to store.

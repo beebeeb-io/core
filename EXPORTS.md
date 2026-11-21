@@ -103,6 +103,14 @@ values. Replacing another locally stored account uses the explicit `*_replacing_
 the coordinator-issued replacement handle; the ordinary install methods return
 `AnotherAccountOnDevice` without consuming the accepted sign-in state.
 
+## Local seals (desktop only, no binding export)
+
+`beebeeb_core::local_seal` (recovery snapshot and per-session scratch stream, design note
+`docs/superpowers/specs/2026-11-18-local-snapshot-and-scratch-seal.md`) is for Rust callers that link core
+directly (the desktop engine). Neither `beebeeb-uniffi` nor `beebeeb-wasm` exports any of it, and a test fails if
+`local_seal` or `ScratchKey` appears in their sources: `ScratchKey` has no byte accessor, no `Clone` and no
+serialise path, so no key can cross an FFI boundary.
+
 ## Legacy UniFFI feature
 
 `legacy-bindings` is off by default and is the only feature that links `beebeeb-upload`. It retains the

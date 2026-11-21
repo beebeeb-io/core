@@ -28,6 +28,7 @@ pub mod kdf;
 pub mod key_proof;
 #[cfg(test)]
 mod label_table_tests;
+pub mod local_seal;
 pub mod media;
 pub mod metadata_wire;
 pub mod name_clash;

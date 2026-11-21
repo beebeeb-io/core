@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     backup, chunk_stream, cli_auth, client_meta, device_link, encrypt, file_request, folder_key, item_id, kdf,
-    key_proof, pair_kdf, passkey, passkey_seal, product_keys, recovery, screen_lock, transfer,
+    key_proof, local_seal, pair_kdf, passkey, passkey_seal, product_keys, recovery, screen_lock, transfer,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -399,6 +399,31 @@ const LABELS: &[Label] = &[
         Slot::Salt,
         "SHA-256 domain prefix over the OS machine id; the output is a device id, never a key",
     ),
+    // local seals (recovery snapshot and scratch stream; design note 2026-11-18)
+    label(
+        "local_seal::SNAPSHOT_KEY_LABEL",
+        local_seal::SNAPSHOT_KEY_LABEL,
+        Slot::InfoWithId,
+        "account key; || file id (a local key, never a file key)",
+    ),
+    label(
+        "local_seal::SNAPSHOT_AAD_LABEL",
+        local_seal::SNAPSHOT_AAD_LABEL,
+        Slot::Aad,
+        "the snapshot key",
+    ),
+    label(
+        "local_seal::SCRATCH_KEY_LABEL",
+        local_seal::SCRATCH_KEY_LABEL,
+        Slot::InfoWithId,
+        "the session scratch key; || scratch id",
+    ),
+    label(
+        "local_seal::SCRATCH_AAD_LABEL",
+        local_seal::SCRATCH_AAD_LABEL,
+        Slot::Aad,
+        "the per-file scratch key",
+    ),
     // passkey vault (B15; web's format, repos/web/src/lib/passkey-vault.ts)
     label(
         "passkey::VAULT_WRAP_INFO",
@@ -523,7 +548,7 @@ fn find(name: &str) -> &'static Label {
 
 #[test]
 fn every_label_is_distinct_and_no_id_carrying_info_is_a_prefix_of_another_info() {
-    assert_eq!(LABELS.len(), 61, "a label was added or removed: review the slot rules");
+    assert_eq!(LABELS.len(), 65, "a label was added or removed: review the slot rules");
     for (i, a) in LABELS.iter().enumerate() {
         assert!(!a.with.is_empty());
         for b in &LABELS[i + 1..] {
