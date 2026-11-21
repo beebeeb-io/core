@@ -32,18 +32,23 @@ pub enum KeptKeyUse {
     NoneHere,
 }
 
-/// Decides whether the kept key may be offered for this sign-in.
+/// Decides whether the kept key may be offered for this sign-in, exactly as the desktop's `read_kept_key` did.
 ///
-/// - An owner tag that names the signing-in user: [`KeptKeyUse::ProveIt`].
-/// - An owner tag that names anyone else, or cannot be read (empty, not UTF-8): [`KeptKeyUse::NoneHere`]. The email
-///   is not consulted then; a tag always wins over the email.
-/// - No tag, and the stored email equals the signing-in email under [`canonical_email`]: [`KeptKeyUse::ProveIt`].
-/// - No tag, and a different, empty or missing email: [`KeptKeyUse::NoneHere`].
+/// - A tag that is not UTF-8 cannot be read: [`KeptKeyUse::NoneHere`].
+/// - A tag that is blank after trimming counts as no tag.
+/// - A tag decides alone (the email is not consulted): [`KeptKeyUse::ProveIt`] only when the trimmed tag equals the
+///   trimmed signing-in user id and that id is not blank.
+/// - No tag, and the stored email equals the signing-in email under [`canonical_email`] (and is not empty):
+///   [`KeptKeyUse::ProveIt`]. A different, empty or missing email: [`KeptKeyUse::NoneHere`].
 pub fn may_use_kept_key(f: &KeptKeyFacts) -> KeptKeyUse {
-    if let Some(tag) = f.owner_tag {
-        let readable = !tag.is_empty() && std::str::from_utf8(tag).is_ok();
-        let signing = f.signing_user_id.as_bytes();
-        return if readable && !signing.is_empty() && same_key(tag, signing) {
+    let tag = match f.owner_tag.map(std::str::from_utf8) {
+        Some(Err(_)) => return KeptKeyUse::NoneHere,
+        Some(Ok(tag)) => Some(tag.trim()).filter(|tag| !tag.is_empty()),
+        None => None,
+    };
+    if let Some(tag) = tag {
+        let signing = f.signing_user_id.trim();
+        return if !signing.is_empty() && same_key(tag.as_bytes(), signing.as_bytes()) {
             KeptKeyUse::ProveIt
         } else {
             KeptKeyUse::NoneHere
@@ -74,9 +79,12 @@ pub enum ProofAnswer {
 }
 
 impl ProofAnswer {
-    /// Reads a failed proof's exact server error code. Only the two codes below have a meaning; every other code is
-    /// [`ProofAnswer::Unavailable`].
-    pub fn from_error_code(code: &str) -> Self {
+    /// Reads a failed proof's HTTP status and exact server error code. Only a 400 with one of the two codes below
+    /// has a meaning; every other status or code is [`ProofAnswer::Unavailable`].
+    pub fn from_error_code(status: u16, code: &str) -> Self {
+        if status != 400 {
+            return Self::Unavailable;
+        }
         match code {
             "recovery_check_missing" => Self::NoCheckOnFile,
             "invalid_recovery_phrase" => Self::WrongPhrase,
@@ -90,7 +98,7 @@ impl ProofAnswer {
 pub enum KeptKeyVerdict {
     /// Use the key. When `tag_it`, record the signing-in user as its owner tag.
     Proven { tag_it: bool },
-    /// The server no longer accepts this key: remove it and sign in without it.
+    /// The server no longer accepts this key: do not use it, and sign in without it.
     Outdated,
     /// No decision could be made: keep the key as it is, and do not use it now.
     Unavailable,
@@ -149,6 +157,7 @@ mod tests {
     #[derive(Deserialize)]
     struct VerdictCase {
         answer: String,
+        status: Option<u16>,
         error_code: Option<String>,
         expect: String,
         tag_it: Option<bool>,
@@ -162,7 +171,10 @@ mod tests {
     }
 
     fn hex(s: &str) -> Vec<u8> {
-        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
     }
 
     fn vectors() -> Vectors {
@@ -202,11 +214,14 @@ mod tests {
                 "Unavailable" => ProofAnswer::Unavailable,
                 other => panic!("unknown answer {other}"),
             };
-            if let Some(code) = &c.error_code {
-                assert_eq!(ProofAnswer::from_error_code(code), answer, "code {code}");
+            if let Some(status) = c.status {
+                let code = c.error_code.as_deref().unwrap_or_default();
+                assert_eq!(ProofAnswer::from_error_code(status, code), answer, "{status} {code}");
             }
             let want = match c.expect.as_str() {
-                "Proven" => KeptKeyVerdict::Proven { tag_it: c.tag_it.unwrap() },
+                "Proven" => KeptKeyVerdict::Proven {
+                    tag_it: c.tag_it.unwrap(),
+                },
                 "Outdated" => KeptKeyVerdict::Outdated,
                 "Unavailable" => KeptKeyVerdict::Unavailable,
                 other => panic!("unknown expect {other}"),
@@ -220,7 +235,13 @@ mod tests {
         let v = vectors();
         assert!(!v.same_key.is_empty());
         for c in v.same_key {
-            assert_eq!(same_key(&hex(&c.a_hex), &hex(&c.b_hex)), c.expect, "{} vs {}", c.a_hex, c.b_hex);
+            assert_eq!(
+                same_key(&hex(&c.a_hex), &hex(&c.b_hex)),
+                c.expect,
+                "{} vs {}",
+                c.a_hex,
+                c.b_hex
+            );
         }
     }
 }
