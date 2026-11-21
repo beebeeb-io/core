@@ -183,7 +183,7 @@ jobs:
         run: cargo test --locked --no-fail-fast -p beebeeb-core -p beebeeb-client -p beebeeb-transfer
 
   dependencies:
-    name: Dependency advisories, licenses & sources
+    name: Dependency licenses & sources
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -194,13 +194,9 @@ jobs:
         with:
           toolchain: "1.96.0"
 
-      - name: Install dependency policy tools
-        run: |
-          cargo install cargo-audit --locked --version 0.22.2
-          cargo install cargo-deny --locked --version 0.20.2
-
-      - name: Dependency advisories
-        run: cargo audit
+      # Advisories (cargo audit) moved to advisories.yml: they fail on a new RustSec entry, not on a change.
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked --version 0.20.2
 
       - name: Dependency licenses and sources
         run: cargo deny --config scripts/deny.toml check licenses sources

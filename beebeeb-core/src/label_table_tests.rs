@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     backup, chunk_stream, cli_auth, client_meta, device_link, encrypt, file_request, folder_key, item_id, kdf,
-    key_proof, local_seal, passkey, passkey_seal, product_keys, recovery, screen_lock, transfer,
+    key_proof, local_seal, pair_kdf, passkey, passkey_seal, product_keys, recovery, screen_lock, transfer,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -437,6 +437,43 @@ const LABELS: &[Label] = &[
         Slot::Salt,
         "WebAuthn PRF eval input (zero-padded to 32, then SHA-256 with the PRF context): an authenticator salt, never an HKDF info",
     ),
+    // Pass browser pairing (moved from the Pass crate with the labels unchanged)
+    label(
+        "pair_kdf::ACCOUNT_DOMAIN",
+        pair_kdf::ACCOUNT_DOMAIN,
+        Slot::Salt,
+        "SHA-256 domain prefix over the normalised email; the output is an account tag, never a key",
+    ),
+    label(
+        "pair_kdf::CODE_INFO",
+        pair_kdf::CODE_INFO,
+        Slot::Info,
+        "X25519 shared secret, transcript salt -> 6-digit comparison code",
+    ),
+    label(
+        "pair_kdf::PAIR_KEY_INFO",
+        pair_kdf::PAIR_KEY_INFO,
+        Slot::Info,
+        "X25519 shared secret, transcript salt -> pair key",
+    ),
+    label(
+        "pair_kdf::MAC_KEY_INFO",
+        pair_kdf::MAC_KEY_INFO,
+        Slot::Info,
+        "X25519 shared secret, transcript salt -> key-confirmation MAC key",
+    ),
+    label(
+        "pair_kdf::EXT_TO_APP_INFO",
+        pair_kdf::EXT_TO_APP_INFO,
+        Slot::Info,
+        "pair key, connection-nonce salt -> extension-to-app channel key",
+    ),
+    label(
+        "pair_kdf::APP_TO_EXT_INFO",
+        pair_kdf::APP_TO_EXT_INFO,
+        Slot::Info,
+        "pair key, connection-nonce salt -> app-to-extension channel key",
+    ),
 ];
 
 /// Every pair where one label is a prefix of another, with why it is not a
@@ -511,7 +548,7 @@ fn find(name: &str) -> &'static Label {
 
 #[test]
 fn every_label_is_distinct_and_no_id_carrying_info_is_a_prefix_of_another_info() {
-    assert_eq!(LABELS.len(), 59, "a label was added or removed: review the slot rules");
+    assert_eq!(LABELS.len(), 65, "a label was added or removed: review the slot rules");
     for (i, a) in LABELS.iter().enumerate() {
         assert!(!a.with.is_empty());
         for b in &LABELS[i + 1..] {
