@@ -47,6 +47,9 @@ cmp test-vectors/direct_upload_pipeline.json "$vector_tmp/test-vectors/direct_up
 python3 "$vector_tmp/test-vectors/tools/gen_name_clash_v1.py" "$vector_tmp/test-vectors/name_clash_v1.json"
 cmp test-vectors/name_clash_v1.json "$vector_tmp/test-vectors/name_clash_v1.json"
 
+python3 -I "$vector_tmp/test-vectors/tools/make_kept_key_vectors.py" "$vector_tmp/test-vectors/kept_key.json"
+cmp test-vectors/kept_key.json "$vector_tmp/test-vectors/kept_key.json"
+
 python3 "$vector_tmp/test-vectors/tools/gen_case_fold_table.py" "$vector_tmp/case_fold.rs"
 cmp beebeeb-core/src/name_tag/case_fold.rs "$vector_tmp/case_fold.rs"
 
