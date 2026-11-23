@@ -11,7 +11,7 @@ use wasm_bindgen::prelude::*;
 
 /// The JS shape of a policy: what `retryPolicy()` returns and what every
 /// function here accepts back. Fields are core's (`snake_case`), and `jitter`
-/// is `"none"` (the shipped default) or `"full"`.
+/// is `"none"` or `"full"` (the shipped default).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryPolicyJs {
     pub max_attempts: u32,
@@ -58,7 +58,7 @@ fn policy_from_js(policy: &JsValue) -> Result<RetryPolicy, JsError> {
 }
 
 /// The shipped policy: six requests in all (one try plus five retries), 500 ms
-/// base, a 30 s cap, no jitter, and a server `Retry-After` honoured.
+/// base, a 30 s cap, full jitter (pass a sample to `retryJitteredDelayMs`), and a server `Retry-After` honoured.
 #[wasm_bindgen(js_name = retryPolicy)]
 pub fn retry_policy() -> Result<JsValue, JsError> {
     serde_wasm_bindgen::to_value(&RetryPolicyJs::from_core(RetryPolicy::DEFAULT))
