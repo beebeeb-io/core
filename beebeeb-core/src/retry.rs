@@ -13,6 +13,22 @@
 
 use beebeeb_types::limits::MAX_RETRY_AFTER_SECONDS;
 
+// Client 429 contract (rate-limit epic 08a-08d). Web and mobile copy these:
+//   * wait `max(Retry-After header, body.retry_after)` plus 0-25 % jitter;
+//   * at most [`CLIENT_429_MAX_RETRIES`] retries of an idempotent request;
+//   * pause the whole client/origin while waiting, not just one request;
+//   * `Retry-After` above [`CLIENT_429_POLICY_REFUSAL_SECONDS`] or
+//     `error: "banned"` is a policy refusal: show "temporarily blocked",
+//     never "can't connect".
+// The 429 body is `{"error": "rate_limited" | "banned", "scope", "retry_after", "message"}`.
+
+/// Most retries of one idempotent request after a 429.
+pub const CLIENT_429_MAX_RETRIES: u32 = 4;
+/// A `Retry-After` above this many seconds is a policy refusal, not a wait.
+pub const CLIENT_429_POLICY_REFUSAL_SECONDS: u64 = 60;
+/// Upper bound of the extra jitter added to a server-stated wait, in percent.
+pub const CLIENT_429_WAIT_JITTER_PERCENT: u64 = 25;
+
 /// How the ladder delay is shortened for a retry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Jitter {
@@ -50,12 +66,14 @@ pub struct RetryPolicy {
 
 impl RetryPolicy {
     /// The policy core has always shipped: one attempt plus five retries,
-    /// 500 ms base, 30 s cap, no jitter, `Retry-After` honoured.
+    /// 500 ms base, 30 s cap, [`Jitter::Full`] (the caller feeds the sample to
+    /// [`Self::jittered_delay_ms`]; [`Self::decide`] stays un-jittered),
+    /// `Retry-After` honoured.
     pub const DEFAULT: Self = Self {
         max_attempts: 6,
         base_ms: 500,
         cap_ms: 30_000,
-        jitter: Jitter::None,
+        jitter: Jitter::Full,
     };
 
     /// The un-jittered ladder delay before retry number `retry` (1-based).
@@ -127,6 +145,13 @@ pub fn parse_retry_after(value: &str) -> Option<u64> {
 #[cfg(test)]
 mod limit_tests {
     use super::*;
+
+    #[test]
+    fn default_jitter_is_full() {
+        assert_eq!(RetryPolicy::DEFAULT.jitter, Jitter::Full);
+        assert_eq!(RetryPolicy::DEFAULT.jittered_delay_ms(1, 500), 250);
+        assert_eq!(RetryPolicy::DEFAULT.delay_ms(1), 500);
+    }
 
     #[test]
     fn retry_after_is_capped() {
