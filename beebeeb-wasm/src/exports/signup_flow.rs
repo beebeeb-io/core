@@ -143,6 +143,13 @@ impl SignupFlowJs {
             .collect())
     }
 
+    /// Take an existing recovery phrase instead of a new one; counts as confirmed.
+    #[wasm_bindgen(js_name = adoptPhrase)]
+    pub fn adopt_phrase(&mut self, phrase: String) -> Result<(), JsError> {
+        let phrase = Zeroizing::new(phrase);
+        self.inner.adopt_phrase(&phrase).map_err(err)
+    }
+
     #[wasm_bindgen(js_name = acknowledgePhrase)]
     pub fn acknowledge_phrase(&mut self) -> Result<(), JsError> {
         self.inner.acknowledge_phrase().map_err(err)

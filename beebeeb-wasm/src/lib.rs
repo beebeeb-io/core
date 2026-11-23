@@ -1509,6 +1509,14 @@ impl WasmSignupCeremony {
         self.inner.begin_phrase().map_err(ceremony_error)
     }
 
+    /// Take an existing recovery phrase instead of generating one; counts as confirmed.
+    /// Throws `crypto` for an invalid phrase, `invalid_state` once confirmed or registering.
+    #[wasm_bindgen(js_name = adoptPhrase)]
+    pub fn adopt_phrase(&mut self, phrase: String) -> Result<(), JsValue> {
+        let phrase = zeroize::Zeroizing::new(phrase);
+        self.inner.adopt_phrase(&phrase).map_err(ceremony_error)
+    }
+
     /// The phrase to show. Throws `phrase_unavailable` before `beginPhrase` or
     /// after the phrase was confirmed (it is wiped then). The returned string
     /// is a plain copy that lives in JS and cannot be wiped: call this only
