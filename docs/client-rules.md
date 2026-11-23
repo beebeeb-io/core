@@ -30,6 +30,10 @@ deduplication; sharing, contact keys, file requests, and search; limits, retry g
 A platform draws UI, maps typed errors to wording, performs requested OS work such as background
 transfer or image encoding, reports the outcome, and renders core events.
 
+Sign-up can adopt an existing recovery phrase (an offline Pass vault's) with `SignupFlow::adopt_phrase`
+instead of generating one: core normalizes and checks it, derives the master key, `x25519` key and
+`recovery_check` from it, and treats it as confirmed. A client passes the typed words and nothing else.
+
 ## Native client boundary
 
 Rust products use `beebeeb-client`; Swift and Kotlin products use `NativeClientHandle` and its opaque
