@@ -58,9 +58,9 @@ use thiserror::Error;
 use zeroize::Zeroizing;
 
 use super::breach::{BreachCheck, BreachVerdict};
-use super::password::{PasswordEvaluation, PasswordPolicy, evaluate_password};
-use crate::CoreError;
+use super::password::{evaluate_password, PasswordEvaluation, PasswordPolicy};
 use crate::kdf::MasterKey;
+use crate::CoreError;
 use crate::{opaque, opaque_protocol, recovery};
 
 /// Floor for the number of words the user must type back, regardless of what
@@ -381,6 +381,28 @@ impl SignupCeremony {
         }
         let (phrase, master_key) = recovery::generate_recovery_phrase()?;
         self.install_phrase(Zeroizing::new(phrase), master_key);
+        Ok(())
+    }
+
+    /// Take an existing recovery phrase (for example the one of an offline Pass vault) instead
+    /// of generating one. The phrase is normalized and checked (an invalid phrase gives
+    /// `Crypto(InvalidRecoveryPhrase)`); the person typed all the words, so it counts as
+    /// acknowledged and confirmed, and the phrase string is wiped. A later
+    /// [`begin_phrase`](Self::begin_phrase) is a no-op. Refused once the phrase is confirmed
+    /// or registration has started.
+    pub fn adopt_phrase(&mut self, phrase: &str) -> Result<(), CeremonyError> {
+        if self.done || self.phrase_confirmed || !matches!(self.registration, Registration::NotStarted) {
+            return Err(CeremonyError::InvalidState {
+                action: "adopt a recovery phrase",
+                reason: "the phrase is already confirmed or registration has started",
+            });
+        }
+        let normalized = recovery::normalize_phrase(phrase);
+        let master_key = recovery::recover_from_phrase(&normalized)?;
+        self.install_phrase(normalized, master_key);
+        self.phrase_acknowledged = true;
+        self.phrase_confirmed = true;
+        self.phrase = None; // Zeroizing wipes on drop
         Ok(())
     }
 
