@@ -908,6 +908,8 @@ internal object IntegrityCheckingUniffiLib {
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_breach_verdict_check_failed(
 ): Short
+external fun uniffi_beebeeb_uniffi_checksum_func_ceremony_step_order(
+): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_ceremony_step_spec_id(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_func_classify_direct_answer(
@@ -1873,6 +1875,8 @@ external fun uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_set_pass
 external fun uniffi_beebeeb_uniffi_checksum_method_phraserecoveryhandle_start(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_acknowledge_phrase(
+): Short
+external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_adopt_phrase(
 ): Short
 external fun uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_breach_request(
 ): Short
@@ -3160,6 +3164,8 @@ external fun uniffi_beebeeb_uniffi_fn_constructor_signupflowhandle_new(`policyRe
 ): Long
 external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_acknowledge_phrase(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_adopt_phrase(`ptr`: Long,`phrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_breach_request(`ptr`: Long,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_method_signupflowhandle_challenge_positions(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -3216,6 +3222,8 @@ external fun uniffi_beebeeb_uniffi_fn_func_breach_verdict_allows_proceeding(`ver
 ): Byte
 external fun uniffi_beebeeb_uniffi_fn_func_breach_verdict_check_failed(`verdict`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
+external fun uniffi_beebeeb_uniffi_fn_func_ceremony_step_order(uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_ceremony_step_spec_id(`step`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_beebeeb_uniffi_fn_func_classify_direct_answer(`call`: RustBuffer.ByValue,`status`: Short,`contentType`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,`retryAfter`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -3537,6 +3545,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_func_breach_verdict_check_failed() != 45507.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_ceremony_step_order() != 31456.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_ceremony_step_spec_id() != 23509.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -3606,7 +3617,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_func_fit_for_seal() != 25405.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_func_generate_recovery_pdf() != 58665.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_func_generate_recovery_pdf() != 8641.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_func_generate_share_token() != 31239.toShort()) {
@@ -4218,7 +4229,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_signupceremonyhandle_acknowledge_phrase() != 41460.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupceremonyhandle_begin_phrase() != 57511.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupceremonyhandle_begin_phrase() != 30569.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_signupceremonyhandle_challenge_positions() != 57102.toShort()) {
@@ -4986,6 +4997,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_acknowledge_phrase() != 5724.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_adopt_phrase() != 48767.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_breach_request() != 18103.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -5079,7 +5093,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_fileprovidercachehandle_open() != 22658.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_masterkeyhandle_from_recovery_phrase() != 63639.toShort()) {
+    if (lib.uniffi_beebeeb_uniffi_checksum_constructor_masterkeyhandle_from_recovery_phrase() != 40547.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_beebeeb_uniffi_checksum_constructor_searchindexhandle_build() != 16971.toShort()) {
@@ -20071,7 +20085,7 @@ open class MasterKeyHandle: Disposable, AutoCloseable, MasterKeyHandleInterface
     companion object {
         
     /**
-     * Reconstruct a MasterKeyHandle from a 12-word BIP39 recovery phrase.
+     * Reconstruct a MasterKeyHandle from the 12 words of a master key.
      */
     @Throws(CryptoException::class) fun `fromRecoveryPhrase`(`phrase`: kotlin.String): MasterKeyHandle {
             return FfiConverterTypeMasterKeyHandle.lift(
@@ -25328,7 +25342,7 @@ public interface SignupCeremonyHandleInterface {
     fun `acknowledgePhrase`()
     
     /**
-     * Generate the recovery phrase and master key (Argon2id, about a second).
+     * Generate the master key (12 words) and the key derived from it (Argon2id, about a second).
      * Idempotent.
      */
     fun `beginPhrase`()
@@ -25578,7 +25592,7 @@ open class SignupCeremonyHandle: Disposable, AutoCloseable, SignupCeremonyHandle
 
     
     /**
-     * Generate the recovery phrase and master key (Argon2id, about a second).
+     * Generate the master key (12 words) and the key derived from it (Argon2id, about a second).
      * Idempotent.
      */
     @Throws(OnboardingException::class)override fun `beginPhrase`()
@@ -25939,6 +25953,11 @@ public interface SignupFlowHandleInterface {
     fun `acknowledgePhrase`()
     
     /**
+     * Take an existing master key instead of a new one; counts as confirmed.
+     */
+    fun `adoptPhrase`(`phrase`: kotlin.String)
+    
+    /**
      * The breach request for this password; `None` when the policy declares no check.
      */
     fun `breachRequest`(`password`: kotlin.String): AuthHttpRequest?
@@ -26109,6 +26128,22 @@ open class SignupFlowHandle: Disposable, AutoCloseable, SignupFlowHandleInterfac
     UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_acknowledge_phrase(
         it,
         _status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Take an existing master key instead of a new one; counts as confirmed.
+     */
+    @Throws(SignupFlowFfiException::class)override fun `adoptPhrase`(`phrase`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(SignupFlowFfiException) { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_method_signupflowhandle_adopt_phrase(
+        it,
+        FfiConverterString.lower(`phrase`),_status)
 }
     }
     
@@ -38088,9 +38123,9 @@ public object FfiConverterTypeBreachVerdictDto : FfiConverterRustBuffer<BreachVe
 enum class CeremonyStepDto {
     
     VERIFY_EMAIL,
-    SET_PASSWORD,
     SAVE_PHRASE,
     CONFIRM_PHRASE,
+    SET_PASSWORD,
     CREATE_ACCOUNT,
     DONE;
 
@@ -45885,6 +45920,19 @@ public typealias FfiConverterTypeSecretString = FfiConverterString
     
 
         /**
+         * The canonical order of the pre-account ceremony: master key first, then the password.
+         */ fun `ceremonyStepOrder`(): List<CeremonyStepDto> {
+            return FfiConverterSequenceTypeCeremonyStepDto.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_beebeeb_uniffi_fn_func_ceremony_step_order(
+    
+        _status)
+}
+    )
+    }
+    
+
+        /**
          * The server step id a ceremony step belongs to (`save_recovery_phrase` for
          * both phrase parts).
          */ fun `ceremonyStepSpecId`(`step`: CeremonyStepDto): kotlin.String {
@@ -46204,7 +46252,7 @@ public typealias FfiConverterTypeSecretString = FfiConverterString
     
 
         /**
-         * Generate a recovery kit PDF with a title, recovery words, and metadata.
+         * Generate a recovery kit PDF with a title, master key words, and metadata.
          *
          * Returns the raw PDF bytes (valid PDF 1.4).
          */

@@ -8539,7 +8539,7 @@ open class MasterKeyHandle: MasterKeyHandleProtocol, @unchecked Sendable {
 
     
     /**
-     * Reconstruct a MasterKeyHandle from a 12-word BIP39 recovery phrase.
+     * Reconstruct a MasterKeyHandle from the 12 words of a master key.
      */
 public static func fromRecoveryPhrase(phrase: String)throws  -> MasterKeyHandle  {
     return try  FfiConverterTypeMasterKeyHandle_lift(try rustCallWithError(FfiConverterTypeCryptoError_lift) {
@@ -12105,7 +12105,7 @@ public protocol SignupCeremonyHandleProtocol: AnyObject, Sendable {
     func acknowledgePhrase() throws 
     
     /**
-     * Generate the recovery phrase and master key (Argon2id, about a second).
+     * Generate the master key (12 words) and the key derived from it (Argon2id, about a second).
      * Idempotent.
      */
     func beginPhrase() throws 
@@ -12296,7 +12296,7 @@ open func acknowledgePhrase()throws   {try rustCallWithError(FfiConverterTypeOnb
 }
     
     /**
-     * Generate the recovery phrase and master key (Argon2id, about a second).
+     * Generate the master key (12 words) and the key derived from it (Argon2id, about a second).
      * Idempotent.
      */
 open func beginPhrase()throws   {try rustCallWithError(FfiConverterTypeOnboardingError_lift) {
@@ -12507,6 +12507,11 @@ public protocol SignupFlowHandleProtocol: AnyObject, Sendable {
     func acknowledgePhrase() throws 
     
     /**
+     * Take an existing master key instead of a new one; counts as confirmed.
+     */
+    func adoptPhrase(phrase: String) throws 
+    
+    /**
      * The breach request for this password; `None` when the policy declares no check.
      */
     func breachRequest(password: String) throws  -> AuthHttpRequest?
@@ -12627,6 +12632,17 @@ public convenience init(policyResponse: AuthHttpResponse)throws  {
 open func acknowledgePhrase()throws   {try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
     uniffi_beebeeb_uniffi_fn_method_signupflowhandle_acknowledge_phrase(
             self.uniffiCloneHandle(),$0
+    )
+}
+}
+    
+    /**
+     * Take an existing master key instead of a new one; counts as confirmed.
+     */
+open func adoptPhrase(phrase: String)throws   {try rustCallWithError(FfiConverterTypeSignupFlowFfiError_lift) {
+    uniffi_beebeeb_uniffi_fn_method_signupflowhandle_adopt_phrase(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(phrase),$0
     )
 }
 }
@@ -24876,9 +24892,9 @@ public func FfiConverterTypeBreachVerdictDto_lower(_ value: BreachVerdictDto) ->
 public enum CeremonyStepDto: Equatable, Hashable {
     
     case verifyEmail
-    case setPassword
     case savePhrase
     case confirmPhrase
+    case setPassword
     case createAccount
     case done
 
@@ -24904,11 +24920,11 @@ public struct FfiConverterTypeCeremonyStepDto: FfiConverterRustBuffer {
         
         case 1: return .verifyEmail
         
-        case 2: return .setPassword
+        case 2: return .savePhrase
         
-        case 3: return .savePhrase
+        case 3: return .confirmPhrase
         
-        case 4: return .confirmPhrase
+        case 4: return .setPassword
         
         case 5: return .createAccount
         
@@ -24926,15 +24942,15 @@ public struct FfiConverterTypeCeremonyStepDto: FfiConverterRustBuffer {
             writeInt(&buf, Int32(1))
         
         
-        case .setPassword:
+        case .savePhrase:
             writeInt(&buf, Int32(2))
         
         
-        case .savePhrase:
+        case .confirmPhrase:
             writeInt(&buf, Int32(3))
         
         
-        case .confirmPhrase:
+        case .setPassword:
             writeInt(&buf, Int32(4))
         
         
@@ -32953,6 +32969,15 @@ public func breachVerdictCheckFailed(verdict: BreachVerdictDto) -> Bool  {
 })
 }
 /**
+ * The canonical order of the pre-account ceremony: master key first, then the password.
+ */
+public func ceremonyStepOrder() -> [CeremonyStepDto]  {
+    return try!  FfiConverterSequenceTypeCeremonyStepDto.lift(try! rustCall() {
+    uniffi_beebeeb_uniffi_fn_func_ceremony_step_order($0
+    )
+})
+}
+/**
  * The server step id a ceremony step belongs to (`save_recovery_phrase` for
  * both phrase parts).
  */
@@ -33218,7 +33243,7 @@ public func fitForSeal(s: String) -> String  {
 })
 }
 /**
- * Generate a recovery kit PDF with a title, recovery words, and metadata.
+ * Generate a recovery kit PDF with a title, master key words, and metadata.
  *
  * Returns the raw PDF bytes (valid PDF 1.4).
  */
@@ -34148,6 +34173,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_breach_verdict_check_failed() != 45507) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_func_ceremony_step_order() != 31456) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_func_ceremony_step_spec_id() != 23509) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -34217,7 +34245,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_func_fit_for_seal() != 25405) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_func_generate_recovery_pdf() != 58665) {
+    if (uniffi_beebeeb_uniffi_checksum_func_generate_recovery_pdf() != 8641) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_func_generate_share_token() != 31239) {
@@ -34829,7 +34857,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_signupceremonyhandle_acknowledge_phrase() != 41460) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_method_signupceremonyhandle_begin_phrase() != 57511) {
+    if (uniffi_beebeeb_uniffi_checksum_method_signupceremonyhandle_begin_phrase() != 30569) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_method_signupceremonyhandle_challenge_positions() != 57102) {
@@ -35597,6 +35625,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_acknowledge_phrase() != 5724) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_adopt_phrase() != 48767) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_beebeeb_uniffi_checksum_method_signupflowhandle_breach_request() != 18103) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -35690,7 +35721,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_beebeeb_uniffi_checksum_constructor_fileprovidercachehandle_open() != 22658) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_beebeeb_uniffi_checksum_constructor_masterkeyhandle_from_recovery_phrase() != 63639) {
+    if (uniffi_beebeeb_uniffi_checksum_constructor_masterkeyhandle_from_recovery_phrase() != 40547) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_beebeeb_uniffi_checksum_constructor_searchindexhandle_build() != 16971) {
