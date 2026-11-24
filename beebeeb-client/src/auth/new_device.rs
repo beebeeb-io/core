@@ -170,14 +170,14 @@ impl NewDeviceUnlock {
         if self.path != NewDeviceUnlockPath::RecoveryKey || self.master_key.is_some() {
             return Err(AuthError::InvalidTransition {
                 step: "new-device recovery-key unlock",
-                requirement: "recovery key is not expected in this state",
+                requirement: "master key is not expected in this state",
             });
         }
         self.flow
             .recovery_phrase_entered()
             .map_err(|_| AuthError::InvalidTransition {
                 step: "new-device recovery-key unlock",
-                requirement: "recovery key could not be accepted",
+                requirement: "master key could not be accepted",
             })?;
         self.master_key = Some(master_key);
         Ok(())

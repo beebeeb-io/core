@@ -481,7 +481,7 @@ pub enum CryptoError {
     #[error("key derivation failed: {detail}")]
     Kdf { detail: String },
 
-    #[error("invalid recovery phrase")]
+    #[error("invalid master key")]
     InvalidRecoveryPhrase,
 
     #[error("invalid input: {detail}")]
@@ -594,7 +594,7 @@ pub struct OpaqueLoginFinishResult {
     pub export_key: Vec<u8>,
 }
 
-/// Result of generating a recovery phrase.
+/// Result of generating a master key.
 #[cfg_attr(feature = "legacy-bindings", derive(uniffi::Record))]
 pub struct RecoveryPhraseResult {
     pub phrase: String,
@@ -902,10 +902,10 @@ fn is_previewable_by_extension(filename: String) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Recovery phrase
+// Master key
 // ---------------------------------------------------------------------------
 
-/// Generate a new 12-word BIP39 recovery phrase and the corresponding master
+/// Generate a new master key (12 BIP39 words) and the corresponding derived
 /// key. The phrase IS the master secret.
 #[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn generate_recovery_phrase() -> Result<RecoveryPhraseResult, CryptoError> {
@@ -917,7 +917,7 @@ pub fn generate_recovery_phrase() -> Result<RecoveryPhraseResult, CryptoError> {
     })
 }
 
-/// Recover a master key from a 12-word BIP39 recovery phrase.
+/// Recover the derived key from the 12 words of a master key.
 /// Returns the 32-byte master key.
 #[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn recover_from_phrase(phrase: String) -> Result<Vec<u8>, CryptoError> {
@@ -1033,7 +1033,7 @@ pub fn derive_share_key(shared_secret: Vec<u8>, file_id: Vec<u8>) -> Result<Vec<
 }
 
 /// Compute a recovery check value from a master key. Returns 32-byte check value.
-/// This is stored server-side so we can verify a recovery phrase produces the
+/// This is stored server-side so we can verify a master key produces the
 /// correct master key.
 #[cfg_attr(feature = "legacy-bindings", uniffi::export)]
 pub fn compute_recovery_check(master_key: Vec<u8>) -> Result<Vec<u8>, CryptoError> {
@@ -1187,7 +1187,7 @@ impl MasterKeyHandle {
 
 #[uniffi::export]
 impl MasterKeyHandle {
-    /// Reconstruct a MasterKeyHandle from a 12-word BIP39 recovery phrase.
+    /// Reconstruct a MasterKeyHandle from the 12 words of a master key.
     #[uniffi::constructor]
     pub fn from_recovery_phrase(phrase: String) -> Result<Arc<Self>, CryptoError> {
         let mk = recovery::recover_from_phrase(&phrase)?;
@@ -4077,7 +4077,7 @@ pub fn generate_thumbnail_large(
 // PDF generation
 // ---------------------------------------------------------------------------
 
-/// Generate a recovery kit PDF with a title, recovery words, and metadata.
+/// Generate a recovery kit PDF with a title, master key words, and metadata.
 ///
 /// Returns the raw PDF bytes (valid PDF 1.4).
 #[uniffi::export]
@@ -4691,9 +4691,9 @@ pub(crate) fn lock_tolerant<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum CeremonyStepDto {
     VerifyEmail,
-    SetPassword,
     SavePhrase,
     ConfirmPhrase,
+    SetPassword,
     CreateAccount,
     Done,
 }
@@ -4709,6 +4709,12 @@ impl From<onb::CeremonyStep> for CeremonyStepDto {
             onb::CeremonyStep::Done => Self::Done,
         }
     }
+}
+
+/// The canonical order of the pre-account ceremony: master key first, then the password.
+#[uniffi::export]
+pub fn ceremony_step_order() -> Vec<CeremonyStepDto> {
+    onb::PRE_ACCOUNT_CEREMONY_ORDER.iter().copied().map(Into::into).collect()
 }
 
 /// The server step id a ceremony step belongs to (`save_recovery_phrase` for
@@ -4757,7 +4763,7 @@ pub enum OnboardingError {
     #[error("the breach lookup was made for a different prefix than this password's")]
     BreachPrefixMismatch,
 
-    #[error("the recovery phrase is not available")]
+    #[error("the master key is not available")]
     PhraseUnavailable,
 
     #[error("expected {expected} words, got {got}")]
@@ -4923,7 +4929,7 @@ impl SignupCeremonyHandle {
             .into())
     }
 
-    /// Generate the recovery phrase and master key (Argon2id, about a second).
+    /// Generate the master key (12 words) and the key derived from it (Argon2id, about a second).
     /// Idempotent.
     pub fn begin_phrase(&self) -> Result<(), OnboardingError> {
         Ok(self.with(|c| c.begin_phrase())?)
@@ -4950,7 +4956,7 @@ impl SignupCeremonyHandle {
     /// `answers` in `challenge_positions` order. Throws `PhraseWordMismatch` /
     /// `PhraseAnswerCount`; retryable.
     pub fn confirm_phrase(&self, answers: Vec<String>) -> Result<(), OnboardingError> {
-        // Each answer is a word of the recovery phrase: wipe our copies on return.
+        // Each answer is a word of the master key: wipe our copies on return.
         let answers: Vec<Zeroizing<String>> = answers.into_iter().map(Zeroizing::new).collect();
         Ok(self.with(|c| c.confirm_phrase(&answers))?)
     }
@@ -5969,6 +5975,43 @@ mod onboarding_binding_tests {
 
     const GOOD_PW: &str = "correct horse battery staple";
 
+    /// Show, acknowledge and confirm the 12 words: the password step opens after this.
+    fn confirm_words(c: &SignupCeremonyHandle) {
+        c.begin_phrase().unwrap();
+        let phrase = c.phrase().unwrap();
+        c.acknowledge_phrase().unwrap();
+        let words: Vec<&str> = phrase.split_whitespace().collect();
+        let answers: Vec<String> = c
+            .challenge_positions()
+            .unwrap()
+            .iter()
+            .map(|p| words[*p as usize - 1].to_owned())
+            .collect();
+        c.confirm_phrase(answers).unwrap();
+    }
+
+    #[test]
+    fn ceremony_step_order_puts_the_master_key_before_the_password() {
+        assert_eq!(
+            ceremony_step_order(),
+            vec![
+                CeremonyStepDto::VerifyEmail,
+                CeremonyStepDto::SavePhrase,
+                CeremonyStepDto::ConfirmPhrase,
+                CeremonyStepDto::SetPassword,
+                CeremonyStepDto::CreateAccount,
+            ]
+        );
+        let c = SignupCeremonyHandle::new(12, false, 3, false, true);
+        assert!(matches!(
+            c.set_password(GOOD_PW.into(), GOOD_PW.into(), None),
+            Err(OnboardingError::StepNotDone {
+                blocking: CeremonyStepDto::SavePhrase,
+                ..
+            })
+        ));
+    }
+
     #[test]
     fn evaluate_password_maps_policy_and_floor() {
         let e = evaluate_password("aaaaaaa".into(), 1); // hostile min_length 1
@@ -6039,6 +6082,7 @@ mod onboarding_binding_tests {
             })
         ));
         c.email_verified();
+        confirm_words(&c);
         assert!(matches!(
             c.set_password("short".into(), "short".into(), None),
             Err(OnboardingError::PasswordTooShort {
@@ -6050,7 +6094,7 @@ mod onboarding_binding_tests {
             c.set_password(GOOD_PW.into(), "other".into(), None),
             Err(OnboardingError::PasswordMismatch)
         ));
-        assert!(matches!(c.phrase(), Err(OnboardingError::PhraseUnavailable)));
+        assert!(matches!(c.phrase(), Err(OnboardingError::PhraseUnavailable)), "wiped once confirmed");
         assert_eq!(
             ceremony_step_spec_id(CeremonyStepDto::ConfirmPhrase),
             "save_recovery_phrase"
@@ -6061,6 +6105,7 @@ mod onboarding_binding_tests {
     fn breach_gate_is_bound_to_the_handle_and_the_ceremonys_own_policy() {
         let clean = "0018A45C4D1DEF81644B54AB7F969B88D65:1\r\n".to_string();
         let c = SignupCeremonyHandle::new(12, false, 3, true, false);
+        confirm_words(&c);
 
         // Required and absent.
         assert!(matches!(
@@ -6107,10 +6152,11 @@ mod onboarding_binding_tests {
     #[test]
     fn abandon_wipes_and_a_poisoned_lock_does_not_brick_the_handle() {
         let c = SignupCeremonyHandle::new(12, false, 3, false, true);
+        confirm_words(&c);
         c.set_password(GOOD_PW.into(), GOOD_PW.into(), None).unwrap();
-        assert_ne!(c.step(), CeremonyStepDto::SetPassword);
+        assert_eq!(c.step(), CeremonyStepDto::CreateAccount);
         c.abandon();
-        assert_eq!(c.step(), CeremonyStepDto::SetPassword);
+        assert_eq!(c.step(), CeremonyStepDto::SavePhrase);
         assert!(matches!(c.phrase(), Err(OnboardingError::PhraseUnavailable)));
 
         // Poison the mutex with a panicking closure; later calls still work (review L10).
@@ -6118,7 +6164,7 @@ mod onboarding_binding_tests {
             c.with(|_| panic!("boom"));
         }));
         assert!(poisoned.is_err());
-        assert_eq!(c.step(), CeremonyStepDto::SetPassword);
+        assert_eq!(c.step(), CeremonyStepDto::SavePhrase);
         c.email_changed();
     }
 
@@ -6130,7 +6176,6 @@ mod onboarding_binding_tests {
         let username = b"binding@beebeeb.io";
 
         let c = SignupCeremonyHandle::new(12, false, 3, false, true);
-        c.set_password(GOOD_PW.into(), GOOD_PW.into(), None).unwrap();
         c.begin_phrase().unwrap();
         let phrase = c.phrase().unwrap();
         c.acknowledge_phrase().unwrap();
@@ -6142,6 +6187,7 @@ mod onboarding_binding_tests {
             .map(|p| words[*p as usize - 1].to_owned())
             .collect();
         c.confirm_phrase(answers).unwrap();
+        c.set_password(GOOD_PW.into(), GOOD_PW.into(), None).unwrap();
         assert_eq!(c.step(), CeremonyStepDto::CreateAccount);
 
         let msg = c.start_registration().unwrap();

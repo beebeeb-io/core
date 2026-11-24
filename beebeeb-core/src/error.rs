@@ -11,7 +11,7 @@ pub enum CoreError {
     #[error("key derivation failed: {0}")]
     Kdf(String),
 
-    #[error("invalid recovery phrase")]
+    #[error("invalid master key")]
     InvalidRecoveryPhrase,
 
     #[error("invalid input: {0}")]

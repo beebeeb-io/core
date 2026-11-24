@@ -216,10 +216,10 @@ pub fn decrypt_chunks(key: &[u8], chunks: JsValue) -> Result<Vec<u8>, JsError> {
 }
 
 // ---------------------------------------------------------------------------
-// Recovery phrase
+// Master key
 // ---------------------------------------------------------------------------
 
-/// Generate a new 12-word BIP39 recovery phrase and the corresponding master
+/// Generate a new master key (12 BIP39 words) and the corresponding derived
 /// key. Returns `{ phrase: string, master_key: Uint8Array }`.
 #[wasm_bindgen]
 pub fn generate_recovery_phrase() -> Result<JsValue, JsError> {
@@ -234,7 +234,7 @@ pub fn generate_recovery_phrase() -> Result<JsValue, JsError> {
     Ok(obj.into())
 }
 
-/// Recover a master key from a 12-word BIP39 recovery phrase.
+/// Recover the derived key from the 12 words of a master key.
 /// Returns the 32-byte master key as `Uint8Array`.
 #[wasm_bindgen]
 pub fn recover_from_phrase(phrase: &str) -> Result<Vec<u8>, JsError> {
@@ -1355,7 +1355,7 @@ impl WasmBreachCheck {
 
 #[derive(serde::Serialize)]
 struct CeremonyStepJs {
-    /// `"verify_email" | "set_password" | "save_phrase" | "confirm_phrase" | "create_account" | "done"`.
+    /// `"verify_email" | "save_phrase" | "confirm_phrase" | "set_password" | "create_account" | "done"`.
     step: &'static str,
     /// The server step id this belongs to (`save_phrase` and `confirm_phrase`
     /// are both `save_recovery_phrase`).
@@ -1387,7 +1387,7 @@ fn ceremony_error(e: onb::CeremonyError) -> JsValue {
 
 /// The signup ceremony state machine, one per signup attempt.
 ///
-/// Holds the password, the recovery phrase and the master key inside WASM
+/// Holds the password, the master key (12 words) and the key derived from it inside WASM
 /// memory in zeroizing buffers. Call `abandon()` when the flow is left (back,
 /// cancel, error): freeing the object or waiting for garbage collection wipes
 /// it too, but on the finalizer's schedule, which can be much later. See `beebeeb_core::onboarding::ceremony` for the rules.
@@ -1441,6 +1441,18 @@ impl WasmSignupCeremony {
         Ok(serde_wasm_bindgen::to_value(&CeremonyStepJs::from_core(
             self.inner.step(),
         ))?)
+    }
+
+    /// The canonical order of the pre-account ceremony (master key first, then the password), as
+    /// `[{ step, spec_step_id }]`. Same as the order `pendingSteps` lists in.
+    #[wasm_bindgen(js_name = ceremonyStepOrder)]
+    pub fn ceremony_step_order() -> Result<JsValue, JsError> {
+        let steps: Vec<CeremonyStepJs> = onb::PRE_ACCOUNT_CEREMONY_ORDER
+            .iter()
+            .copied()
+            .map(CeremonyStepJs::from_core)
+            .collect();
+        Ok(serde_wasm_bindgen::to_value(&steps)?)
     }
 
     /// Every pending step in canonical order, as `[{ step, spec_step_id }]`.
@@ -1502,14 +1514,14 @@ impl WasmSignupCeremony {
         self.set_password_js(&password, &confirmation, None)
     }
 
-    /// Generate the recovery phrase and master key (Argon2id, about a second).
+    /// Generate the master key (12 words) and the key derived from it (Argon2id, about a second).
     /// Idempotent.
     #[wasm_bindgen(js_name = beginPhrase)]
     pub fn begin_phrase(&mut self) -> Result<(), JsValue> {
         self.inner.begin_phrase().map_err(ceremony_error)
     }
 
-    /// Take an existing recovery phrase instead of generating one; counts as confirmed.
+    /// Take an existing master key instead of generating one; counts as confirmed.
     /// Throws `crypto` for an invalid phrase, `invalid_state` once confirmed or registering.
     #[wasm_bindgen(js_name = adoptPhrase)]
     pub fn adopt_phrase(&mut self, phrase: String) -> Result<(), JsValue> {
@@ -1544,7 +1556,7 @@ impl WasmSignupCeremony {
     /// `phrase_word_mismatch` / `phrase_answer_count`; retryable.
     #[wasm_bindgen(js_name = confirmPhrase)]
     pub fn confirm_phrase(&mut self, answers: js_sys::Array) -> Result<(), JsValue> {
-        // Each answer is a word of the recovery phrase: hold the Rust copies in
+        // Each answer is a word of the master key: hold the Rust copies in
         // `Zeroizing` so they are wiped when this call returns.
         let answers: Vec<zeroize::Zeroizing<String>> = answers
             .iter()
@@ -1685,7 +1697,7 @@ pub fn storage_format_si(bytes: i64) -> String {
 // PDF generation
 // ---------------------------------------------------------------------------
 
-/// Generate a recovery kit PDF with a title, recovery words, and metadata.
+/// Generate a recovery kit PDF with a title, master key words, and metadata.
 ///
 /// `metadata_keys` and `metadata_values` are parallel arrays of key-value pairs.
 /// Returns the raw PDF bytes as `Uint8Array`.
@@ -3587,6 +3599,23 @@ mod tests {
         let mut c = WasmSignupCeremony::new(12, true, 3, true, false);
         assert_eq!(c.inner.step().as_str(), "verify_email");
         c.email_verified();
+        assert_eq!(c.inner.step().as_str(), "save_phrase");
+        assert_eq!(
+            c.try_set_password(PW, PW, None).expect_err("master key first").code(),
+            "step_not_done"
+        );
+        c.inner.begin_phrase().unwrap();
+        let shown = c.inner.phrase().unwrap();
+        c.inner.acknowledge_phrase().unwrap();
+        let words: Vec<&str> = shown.split_whitespace().collect();
+        let answers: Vec<&str> = c
+            .inner
+            .challenge_positions()
+            .unwrap()
+            .iter()
+            .map(|p| words[*p as usize - 1])
+            .collect();
+        c.inner.confirm_phrase(&answers).unwrap();
         assert_eq!(c.inner.step().as_str(), "set_password");
 
         let short = c.try_set_password("short", "short", None);
@@ -3623,14 +3652,12 @@ mod tests {
             )
             .unwrap();
         assert!(c.try_set_password(PW, PW, Some(&clean.check)).is_ok());
-        // create_account is still gated on the phrase steps.
-        let early = c.inner.start_registration();
-        let Err(gated) = early else {
+        // abandon() returns to a fresh ceremony, and create_account is gated again.
+        c.abandon();
+        let Err(gated) = c.inner.start_registration() else {
             panic!("registration must be gated")
         };
         assert_eq!(gated.code(), "step_not_done");
-        // abandon() returns to a fresh ceremony.
-        c.abandon();
         assert_eq!(c.inner.step().as_str(), "verify_email");
     }
 

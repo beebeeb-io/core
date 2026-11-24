@@ -139,9 +139,6 @@ async fn signup_registers_and_persists_its_hardware_identity() {
     )
     .unwrap();
     client.verify_signup_email(&mut signup, "123456".into()).await.unwrap();
-    signup
-        .set_password("Valid-password-A9!", "Valid-password-A9!", None)
-        .unwrap();
     let kit = signup.begin_recovery_kit().unwrap();
     let words: Vec<String> = kit.words().map(str::to_owned).collect();
     signup.mark_recovery_output_saved(RecoveryKitOutput::Pdf);
@@ -154,6 +151,9 @@ async fn signup_registers_and_persists_its_hardware_identity() {
         .map(|position| words[position as usize - 1].clone())
         .collect();
     signup.confirm_phrase(&answers).unwrap();
+    signup
+        .set_password("Valid-password-A9!", "Valid-password-A9!", None)
+        .unwrap();
 
     let created = client
         .create_account(&mut signup, "terms-v1".into(), &store)

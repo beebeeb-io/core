@@ -133,11 +133,11 @@ impl Default for KdfParams {
 )]
 pub const CHUNK_SIZE: usize = 1024 * 1024; // 1 MiB
 
-/// Number of words in a BIP39 recovery phrase: 12.
+/// Number of words in a master key (BIP39): 12.
 ///
 /// A 12-word BIP39 mnemonic encodes 128 bits of entropy, which is the master
-/// secret for the user's account. The recovery phrase can recreate the master
-/// key independently of the password — it is the ultimate backup.
+/// secret for the user's account. The 12 words recreate the derived key
+/// independently of the password — they are the ultimate backup.
 ///
 /// Used by `beebeeb-core::recovery` to generate and validate phrases.
 pub const RECOVERY_WORD_COUNT: usize = 12;

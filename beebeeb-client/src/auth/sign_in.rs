@@ -71,7 +71,7 @@ impl Client {
         }
     }
 
-    /// Starts the no-wait recovery path by combining the recovery key with a
+    /// Starts the no-wait recovery path by combining the master key with a
     /// one-use password proof obtained immediately beforehand.
     pub async fn start_recovery_with_password(
         &self,

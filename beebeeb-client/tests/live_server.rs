@@ -137,7 +137,6 @@ async fn provision_account() -> TestResult<LiveAccount> {
             .await
             .map_err(|error| format!("account provisioning could not verify the signup email: {error}"))?;
     }
-    signup.set_password(&password, &password, None)?;
     let kit = signup.begin_recovery_kit()?;
     let recovery_words: Vec<String> = kit.words().map(str::to_owned).collect();
     if recovery_words.len() != policy.recovery_phrase.word_count as usize {
@@ -157,6 +156,7 @@ async fn provision_account() -> TestResult<LiveAccount> {
         .map(|position| recovery_words[position as usize - 1].clone())
         .collect();
     signup.confirm_phrase(&answers)?;
+    signup.set_password(&password, &password, None)?;
 
     let store = MemorySecretStore::default();
     let created = client

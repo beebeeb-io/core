@@ -270,7 +270,7 @@ pub async fn add_passkey<H: PasskeyHttp, A: PasskeyAuthenticator>(
 pub enum VaultOutcome {
     /// The escrow opened: the vault key, for the client's credential store.
     Unlocked(MasterKey),
-    /// The passkey gave no PRF output: the password or the recovery phrase is still needed (DW-A30).
+    /// The passkey gave no PRF output: the password or the master key is still needed (DW-A30).
     NoPrf,
     /// The passkey has PRF but no escrow was stored for it.
     NoEscrow,

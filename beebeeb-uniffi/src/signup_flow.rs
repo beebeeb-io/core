@@ -145,7 +145,7 @@ impl SignupFlowHandle {
         self.with(|f| Ok(f.phrase_words()?.iter().map(|w| w.to_string()).collect()))
     }
 
-    /// Take an existing recovery phrase instead of a new one; counts as confirmed.
+    /// Take an existing master key instead of a new one; counts as confirmed.
     pub fn adopt_phrase(&self, phrase: String) -> Result<(), SignupFlowFfiError> {
         let phrase = Zeroizing::new(phrase);
         self.with(|f| f.adopt_phrase(&phrase))

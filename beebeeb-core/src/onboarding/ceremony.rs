@@ -16,19 +16,20 @@
 //!
 //! ```text
 //!   verify_email_code (only if the server requires it)
-//!   set_password            policy evaluation + bound breach check + confirmation
-//!   save_recovery_phrase    SavePhrase (shown + acknowledged)
+//!   save_recovery_phrase    SavePhrase (the master key's 12 words shown + acknowledged)
 //!                           ConfirmPhrase (N words typed back)
+//!   set_password            policy evaluation + bound breach check + confirmation
 //!   create_account          registration_start -> [server] -> registration_finish
 //!                           -> [server accepts] -> account_created
 //! ```
 //!
-//! The relative order of `set_password` and the phrase steps is **not**
-//! enforced here: the shipped web client shows the phrase first, while the
-//! spec's example document lists the password first, and the server's `steps`
-//! array is what orders the UI. The machine gates only `create_account`
-//! ([`SignupCeremony::pending_steps`] must be down to `CreateAccount`). See
-//! [`SignupCeremony::step`] for the canonical order it reports.
+//! The master key comes first, then the password: [`SignupCeremony::set_password`]
+//! is refused with [`CeremonyError::StepNotDone`] until the 12 words are
+//! confirmed (or adopted with [`SignupCeremony::adopt_phrase`]), and
+//! `create_account` runs only when [`SignupCeremony::pending_steps`] is down to
+//! `CreateAccount`. The order is [`PRE_ACCOUNT_CEREMONY_ORDER`]; going back to
+//! the words after the password keeps the same words ([`SignupCeremony::begin_phrase`]
+//! is idempotent).
 //!
 //! # Memory hygiene
 //!
@@ -69,23 +70,35 @@ use crate::{opaque, opaque_protocol, recovery};
 /// `policy.recovery_phrase.verify_word_count`.
 pub const VERIFY_WORD_COUNT_FLOOR: u32 = 3;
 
-/// Steps of the ceremony, in the canonical order [`SignupCeremony::step`] reports.
+/// Steps of the ceremony, in the canonical order [`SignupCeremony::step`] reports
+/// (see [`PRE_ACCOUNT_CEREMONY_ORDER`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CeremonyStep {
     /// Server `verify_email_code`. Completed by the client calling
     /// [`SignupCeremony::email_verified`] after the server accepted the code.
     VerifyEmail,
-    /// Server `set_password`.
-    SetPassword,
-    /// Server `save_recovery_phrase`, part 1: phrase generated, shown and acknowledged.
+    /// Server `save_recovery_phrase`, part 1: master key generated, shown and acknowledged.
     SavePhrase,
     /// Server `save_recovery_phrase`, part 2: words typed back correctly.
     ConfirmPhrase,
+    /// Server `set_password`. Only after the master key is confirmed or adopted.
+    SetPassword,
     /// Server `create_account`: OPAQUE registration.
     CreateAccount,
     /// Terminal.
     Done,
 }
+
+/// The canonical order of the pre-account ceremony: master key first, then the
+/// password. [`SignupCeremony::pending_steps`] lists in this order and the clients
+/// render their step bar from it.
+pub const PRE_ACCOUNT_CEREMONY_ORDER: [CeremonyStep; 5] = [
+    CeremonyStep::VerifyEmail,
+    CeremonyStep::SavePhrase,
+    CeremonyStep::ConfirmPhrase,
+    CeremonyStep::SetPassword,
+    CeremonyStep::CreateAccount,
+];
 
 impl CeremonyStep {
     /// Stable lowercase token, one per ceremony step (WASM and logs).
@@ -161,7 +174,7 @@ pub enum CeremonyError {
     BreachCheckMissing,
     #[error("the breach check was run for a different password")]
     BreachCheckStale,
-    #[error("the recovery phrase is not available (not generated, or already confirmed)")]
+    #[error("the master key is not available (not generated, or already confirmed)")]
     PhraseUnavailable,
     #[error("expected {expected} words, got {got}")]
     PhraseAnswerCount { expected: usize, got: usize },
@@ -262,14 +275,14 @@ impl SignupCeremony {
         if self.config.email_verification_required && !self.email_verified {
             out.push(CeremonyStep::VerifyEmail);
         }
-        if self.password.is_none() {
-            out.push(CeremonyStep::SetPassword);
-        }
         if !self.phrase_acknowledged {
             out.push(CeremonyStep::SavePhrase);
         }
         if !self.phrase_confirmed {
             out.push(CeremonyStep::ConfirmPhrase);
+        }
+        if self.password.is_none() {
+            out.push(CeremonyStep::SetPassword);
         }
         out.push(CeremonyStep::CreateAccount);
         out
@@ -328,7 +341,8 @@ impl SignupCeremony {
     /// `fail_open`. A bare verdict is deliberately not accepted: it could be
     /// stale after the user edited the field, or forged.
     ///
-    /// Rejections, in order: mismatch with `confirmation`, below the policy
+    /// Refused with `StepNotDone` until the master key is confirmed or adopted.
+    /// Other rejections, in order: mismatch with `confirmation`, below the policy
     /// minimum, breach check missing, breach check for another password, found
     /// in a breach corpus, breach check required but could not run.
     ///
@@ -340,6 +354,18 @@ impl SignupCeremony {
         confirmation: &str,
         breach: Option<&BreachCheck>,
     ) -> Result<PasswordEvaluation, CeremonyError> {
+        if !self.phrase_acknowledged {
+            return Err(CeremonyError::StepNotDone {
+                action: "set the password",
+                blocking: CeremonyStep::SavePhrase,
+            });
+        }
+        if !self.phrase_confirmed {
+            return Err(CeremonyError::StepNotDone {
+                action: "set the password",
+                blocking: CeremonyStep::ConfirmPhrase,
+            });
+        }
         if password != confirmation {
             return Err(CeremonyError::PasswordMismatch);
         }
@@ -372,7 +398,7 @@ impl SignupCeremony {
 
     // -- save_recovery_phrase ---------------------------------------------
 
-    /// Generate the recovery phrase and its master key (Argon2id, roughly a
+    /// Generate the master key (12 words) and the key derived from it (Argon2id, roughly a
     /// second). Idempotent: a second call keeps the existing phrase, so going
     /// back and forward in the UI never shows a different phrase.
     pub fn begin_phrase(&mut self) -> Result<(), CeremonyError> {
@@ -384,7 +410,7 @@ impl SignupCeremony {
         Ok(())
     }
 
-    /// Take an existing recovery phrase (for example the one of an offline Pass vault) instead
+    /// Take an existing master key (for example the one of an offline Pass vault) instead
     /// of generating one. The phrase is normalized and checked (an invalid phrase gives
     /// `Crypto(InvalidRecoveryPhrase)`); the person typed all the words, so it counts as
     /// acknowledged and confirmed, and the phrase string is wiped. A later
@@ -393,8 +419,8 @@ impl SignupCeremony {
     pub fn adopt_phrase(&mut self, phrase: &str) -> Result<(), CeremonyError> {
         if self.done || self.phrase_confirmed || !matches!(self.registration, Registration::NotStarted) {
             return Err(CeremonyError::InvalidState {
-                action: "adopt a recovery phrase",
-                reason: "the phrase is already confirmed or registration has started",
+                action: "adopt a master key",
+                reason: "the master key is already confirmed or registration has started",
             });
         }
         let normalized = recovery::normalize_phrase(phrase);
@@ -451,7 +477,7 @@ impl SignupCeremony {
     pub fn confirm_phrase<S: AsRef<str>>(&mut self, answers: &[S]) -> Result<(), CeremonyError> {
         if !self.phrase_acknowledged {
             return Err(CeremonyError::StepNotDone {
-                action: "confirm the recovery phrase",
+                action: "confirm the master key",
                 blocking: CeremonyStep::SavePhrase,
             });
         }
@@ -622,6 +648,16 @@ mod tests {
         c.install_phrase(Zeroizing::new(phrase.to_owned()), MasterKey::from_bytes([7u8; 32]));
     }
 
+    /// A ceremony whose 12 words are already confirmed: the password step is open.
+    fn with_confirmed_phrase(config: CeremonyConfig) -> SignupCeremony {
+        let mut c = SignupCeremony::new(config);
+        with_fixed_phrase(&mut c);
+        c.acknowledge_phrase().unwrap();
+        let a = answers_for(&c);
+        c.confirm_phrase(&a).unwrap();
+        c
+    }
+
     fn answers_for(c: &SignupCeremony) -> Vec<String> {
         let phrase = c.phrase().unwrap();
         let words: Vec<&str> = phrase.split_whitespace().collect();
@@ -634,11 +670,11 @@ mod tests {
 
     fn ready_for_registration(c: &mut SignupCeremony) {
         c.email_verified();
-        c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
         with_fixed_phrase(c);
         c.acknowledge_phrase().unwrap();
         let a = answers_for(c);
         c.confirm_phrase(&a).unwrap();
+        c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
     }
 
     #[test]
@@ -648,12 +684,13 @@ mod tests {
             c.pending_steps(),
             vec![
                 CeremonyStep::VerifyEmail,
-                CeremonyStep::SetPassword,
                 CeremonyStep::SavePhrase,
                 CeremonyStep::ConfirmPhrase,
+                CeremonyStep::SetPassword,
                 CeremonyStep::CreateAccount
             ]
         );
+        assert_eq!(c.pending_steps(), PRE_ACCOUNT_CEREMONY_ORDER.to_vec());
         assert_eq!(c.step(), CeremonyStep::VerifyEmail);
     }
 
@@ -661,7 +698,7 @@ mod tests {
     fn email_step_is_absent_when_the_server_does_not_require_it() {
         let c = SignupCeremony::new(cfg(false));
         assert!(!c.pending_steps().contains(&CeremonyStep::VerifyEmail));
-        assert_eq!(c.step(), CeremonyStep::SetPassword);
+        assert_eq!(c.step(), CeremonyStep::SavePhrase);
     }
 
     #[test]
@@ -686,14 +723,6 @@ mod tests {
         assert!(matches!(
             c.start_registration(),
             Err(CeremonyError::StepNotDone {
-                blocking: CeremonyStep::SetPassword,
-                ..
-            })
-        ));
-        c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
-        assert!(matches!(
-            c.start_registration(),
-            Err(CeremonyError::StepNotDone {
                 blocking: CeremonyStep::SavePhrase,
                 ..
             })
@@ -709,34 +738,71 @@ mod tests {
         ));
         let a = answers_for(&c);
         c.confirm_phrase(&a).unwrap();
+        assert!(matches!(
+            c.start_registration(),
+            Err(CeremonyError::StepNotDone {
+                blocking: CeremonyStep::SetPassword,
+                ..
+            })
+        ));
+        c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
         assert_eq!(c.step(), CeremonyStep::CreateAccount);
         assert!(c.start_registration().is_ok());
     }
 
     #[test]
-    fn password_and_phrase_steps_may_happen_in_either_order() {
-        // Phrase first (what the shipped web client does today)...
-        let mut a = SignupCeremony::new(cfg(false));
-        with_fixed_phrase(&mut a);
-        a.acknowledge_phrase().unwrap();
-        let ans = answers_for(&a);
-        a.confirm_phrase(&ans).unwrap();
-        assert_eq!(a.step(), CeremonyStep::SetPassword);
-        a.set_password(GOOD_PW, GOOD_PW, None).unwrap();
-        assert_eq!(a.step(), CeremonyStep::CreateAccount);
-        // ...and password first (the spec's example order) end in the same place.
-        let mut b = SignupCeremony::new(cfg(false));
-        b.set_password(GOOD_PW, GOOD_PW, None).unwrap();
-        with_fixed_phrase(&mut b);
-        b.acknowledge_phrase().unwrap();
-        let ans = answers_for(&b);
-        b.confirm_phrase(&ans).unwrap();
-        assert_eq!(b.step(), CeremonyStep::CreateAccount);
+    fn set_password_is_refused_until_the_master_key_is_confirmed() {
+        let mut c = SignupCeremony::new(cfg(false));
+        let refused = |c: &mut SignupCeremony, blocking| {
+            assert!(
+                matches!(
+                    c.set_password(GOOD_PW, GOOD_PW, None),
+                    Err(CeremonyError::StepNotDone { blocking: b, .. }) if b == blocking
+                ),
+                "{blocking:?}"
+            );
+        };
+        refused(&mut c, CeremonyStep::SavePhrase);
+        with_fixed_phrase(&mut c);
+        refused(&mut c, CeremonyStep::SavePhrase);
+        c.acknowledge_phrase().unwrap();
+        refused(&mut c, CeremonyStep::ConfirmPhrase);
+        assert_eq!(c.step(), CeremonyStep::ConfirmPhrase, "a refusal stores nothing");
+        let a = answers_for(&c);
+        c.confirm_phrase(&a).unwrap();
+        assert_eq!(c.step(), CeremonyStep::SetPassword);
+        c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
+        assert_eq!(c.step(), CeremonyStep::CreateAccount);
+    }
+
+    #[test]
+    fn an_adopted_master_key_opens_the_password_step() {
+        let mut c = SignupCeremony::new(cfg(false));
+        let (phrase, _) = recovery::generate_recovery_phrase().unwrap();
+        c.adopt_phrase(&phrase).unwrap();
+        assert_eq!(c.step(), CeremonyStep::SetPassword);
+        c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
+        assert_eq!(c.step(), CeremonyStep::CreateAccount);
+    }
+
+    #[test]
+    fn going_back_to_the_words_after_the_password_keeps_the_same_words() {
+        let mut c = SignupCeremony::new(cfg(false));
+        c.begin_phrase().unwrap();
+        let shown = c.phrase().unwrap();
+        c.acknowledge_phrase().unwrap();
+        c.begin_phrase().unwrap();
+        assert_eq!(*shown, *c.phrase().unwrap());
+        let a = answers_for(&c);
+        c.confirm_phrase(&a).unwrap();
+        c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
+        c.begin_phrase().unwrap();
+        assert_eq!(c.step(), CeremonyStep::CreateAccount, "begin_phrase after confirming changes nothing");
     }
 
     #[test]
     fn set_password_rejections() {
-        let mut c = SignupCeremony::new(cfg(false));
+        let mut c = with_confirmed_phrase(cfg(false));
         assert!(matches!(
             c.set_password(GOOD_PW, "different", None),
             Err(CeremonyError::PasswordMismatch)
@@ -767,12 +833,12 @@ mod tests {
         );
 
         // Clean answer passes.
-        let mut c = SignupCeremony::new(cfg_breach(false));
+        let mut c = with_confirmed_phrase(cfg_breach(false));
         let ok = answered(GOOD_PW, BreachResponse::Body(&body));
         assert!(c.set_password(GOOD_PW, GOOD_PW, Some(&ok)).is_ok());
 
         // Breached is refused with the count.
-        let mut c = SignupCeremony::new(cfg_breach(true));
+        let mut c = with_confirmed_phrase(cfg_breach(true));
         let hit = answered(GOOD_PW, BreachResponse::Body(&breached_body));
         assert!(matches!(
             c.set_password(GOOD_PW, GOOD_PW, Some(&hit)),
@@ -782,9 +848,9 @@ mod tests {
 
         // Outage: the SERVER's fail_open decides, via the config.
         let down = answered(GOOD_PW, BreachResponse::Unavailable);
-        let mut open = SignupCeremony::new(cfg_breach(true));
+        let mut open = with_confirmed_phrase(cfg_breach(true));
         assert!(open.set_password(GOOD_PW, GOOD_PW, Some(&down)).is_ok());
-        let mut closed = SignupCeremony::new(cfg_breach(false));
+        let mut closed = with_confirmed_phrase(cfg_breach(false));
         assert!(matches!(
             closed.set_password(GOOD_PW, GOOD_PW, Some(&down)),
             Err(CeremonyError::BreachCheckBlocked)
@@ -797,7 +863,7 @@ mod tests {
         // Task 1744 review M1 / Codex P1: the user edits the field while the
         // request is in flight; the old password's "clean" must not pass.
         let body = clean_body();
-        let mut c = SignupCeremony::new(cfg_breach(true));
+        let mut c = with_confirmed_phrase(cfg_breach(true));
         let for_old = answered("an older password!", BreachResponse::Body(&body));
         let err = c.set_password(GOOD_PW, GOOD_PW, Some(&for_old)).unwrap_err();
         assert!(matches!(err, CeremonyError::BreachCheckStale), "{err}");
@@ -807,7 +873,7 @@ mod tests {
 
     #[test]
     fn a_missing_or_unanswered_breach_check_is_refused_when_required() {
-        let mut c = SignupCeremony::new(cfg_breach(true));
+        let mut c = with_confirmed_phrase(cfg_breach(true));
         let err = c.set_password(GOOD_PW, GOOD_PW, None).unwrap_err();
         assert!(matches!(err, CeremonyError::BreachCheckMissing), "{err}");
         assert_eq!(err.code(), "breach_check_missing");
@@ -824,7 +890,7 @@ mod tests {
     #[test]
     fn an_empty_endpoint_body_does_not_satisfy_a_fail_closed_gate() {
         // Task 1744 review M2 through the ceremony: an unseeded server node.
-        let mut c = SignupCeremony::new(cfg_breach(false));
+        let mut c = with_confirmed_phrase(cfg_breach(false));
         let empty = answered(GOOD_PW, BreachResponse::Body(""));
         assert!(matches!(
             c.set_password(GOOD_PW, GOOD_PW, Some(&empty)),
@@ -834,7 +900,7 @@ mod tests {
 
     #[test]
     fn a_supplied_breach_check_is_ignored_when_the_document_requires_none() {
-        let mut c = SignupCeremony::new(cfg(false));
+        let mut c = with_confirmed_phrase(cfg(false));
         let hit = answered(
             "something else entirely",
             BreachResponse::Body(&format!("{OTHER_SUFFIX}:1")),
@@ -844,7 +910,7 @@ mod tests {
 
     #[test]
     fn server_policy_numbers_drive_the_gate() {
-        let mut c = SignupCeremony::new(CeremonyConfig {
+        let mut c = with_confirmed_phrase(CeremonyConfig {
             password_policy: PasswordPolicy::from_server(40),
             ..cfg(false)
         });
@@ -1073,11 +1139,11 @@ mod tests {
         assert!(matches!(c.start_registration(), Err(CeremonyError::StepNotDone { .. })));
         // And the same object is usable for a fresh attempt with the same config.
         c.email_verified();
-        c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
         with_fixed_phrase(&mut c);
         c.acknowledge_phrase().unwrap();
         let a = answers_for(&c);
         c.confirm_phrase(&a).unwrap();
+        c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
         assert_eq!(c.step(), CeremonyStep::CreateAccount);
     }
 
@@ -1087,7 +1153,7 @@ mod tests {
         c.done = true;
         c.wipe();
         assert!(!c.done);
-        assert_eq!(c.step(), CeremonyStep::SetPassword);
+        assert_eq!(c.step(), CeremonyStep::SavePhrase);
     }
 
     /// The whole ceremony against a real server-side OPAQUE implementation,
@@ -1099,7 +1165,6 @@ mod tests {
 
         let mut c = SignupCeremony::new(cfg(true));
         c.email_verified();
-        c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
         c.begin_phrase().unwrap();
         let shown = c.phrase().unwrap();
         c.acknowledge_phrase().unwrap();
@@ -1113,6 +1178,7 @@ mod tests {
             .map(|p| words[*p as usize - 1].to_owned())
             .collect();
         c.confirm_phrase(&answers).unwrap();
+        c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
         assert_eq!(c.step(), CeremonyStep::CreateAccount);
 
         let start = c.start_registration().unwrap();

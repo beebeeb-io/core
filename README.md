@@ -38,7 +38,7 @@ Native products start with `beebeeb-client` (or `NativeClientHandle` in Swift/Ko
 key functions. Its services cover authentication and devices, files and sync, transfers and
 thumbnails, sharing, contacts, search, settings, backup, File Provider, and ordered sign-out. A
 password and any configured authenticator produce a locked session. A new device then uses either
-device approval, a passkey plus an email code, or a recovery key plus an email code; installation
+device approval, a passkey plus an email code, or a master key plus an email code; installation
 finishes with account-key proof. Account creation is web-only.
 
 ## Cryptography

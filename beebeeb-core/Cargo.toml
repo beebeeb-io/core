@@ -1,6 +1,6 @@
 [package]
 name = "beebeeb-core"
-description = "Cryptographic core for Beebeeb — encryption, key derivation, recovery phrases"
+description = "Cryptographic core for Beebeeb — encryption, key derivation, master keys"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

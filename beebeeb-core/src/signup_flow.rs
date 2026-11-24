@@ -6,9 +6,9 @@
 //! SignupPolicy::request()            GET  /api/v1/onboarding           → SignupPolicy::from_response
 //! SignupFlow::send_code(email)       POST /api/v1/auth/signup/email-start  {email}          (202, same for any address)
 //! SignupFlow::verify_code(code)      POST /api/v1/auth/signup/email-verify {email, code}    → signup_ticket (kept here)
+//! SignupFlow::begin_phrase()         the master key's 12 BIP39 words generated here; confirm_phrase(answers) checks 3 of them
 //! SignupFlow::breach_request(pw)     GET  <policy.password.breach_check.endpoint, {prefix}> (k-anonymity, text body)
-//! SignupFlow::set_password(pw, pw2)  the ceremony's gate: length, match, breach verdict
-//! SignupFlow::begin_phrase()         12 BIP39 words generated here; confirm_phrase(answers) checks 3 of them
+//! SignupFlow::set_password(pw, pw2)  the ceremony's gate: only after the words are confirmed; length, match, breach verdict
 //! SignupFlow::register_start()       POST /api/v1/opaque/register-start  {email, client_message, signup_ticket}
 //! SignupFlow::on_register_start(r)   POST /api/v1/opaque/register-finish {email, client_message, x25519_public_key,
 //!                                                                         recovery_check, signup_ticket}
@@ -198,7 +198,7 @@ pub enum SignupError {
     BreachCheckMissing,
     /// The typed-back words do not match (DW-A41). Does not say which.
     PhraseWordMismatch,
-    /// Not 12 valid recovery words (checksum included).
+    /// Not 12 valid master key words (checksum included).
     InvalidPhrase,
     /// The server did not accept the phrase for this email (DW-A48). Nothing changed.
     PhraseNotAccepted,
@@ -479,14 +479,15 @@ impl SignupFlow {
         self.breach.record(&self.policy, status, body)
     }
 
-    /// Step 4's gate (DW-A36): the ceremony checks the match, the length and the breach verdict.
+    /// The password step's gate (DW-A36). The master key comes first: `WrongState` until the 12 words
+    /// are confirmed or adopted. Then the ceremony checks the match, the length and the breach verdict.
     pub fn set_password(&mut self, password: &str, confirmation: &str) -> Result<PasswordEvaluation, SignupError> {
         let eval = self.ceremony.set_password(password, confirmation, self.breach.get())?;
         self.registering = Registering::No;
         Ok(eval)
     }
 
-    /// Step 5 (DW-A39): the 12 words, generated here once; calling again returns the same words.
+    /// The master key's 12 words (DW-A39), generated here once; calling again returns the same words.
     pub fn phrase_words(&mut self) -> Result<Vec<Zeroizing<String>>, SignupError> {
         self.ceremony.begin_phrase()?;
         let phrase = self.ceremony.phrase()?;
@@ -496,7 +497,7 @@ impl SignupFlow {
             .collect())
     }
 
-    /// Take an existing recovery phrase (an offline Pass vault's) instead of a new one. Counts as
+    /// Take an existing master key (an offline Pass vault's) instead of a new one. Counts as
     /// confirmed; `InvalidPhrase` for anything but 12 valid words.
     pub fn adopt_phrase(&mut self, phrase: &str) -> Result<(), SignupError> {
         self.ceremony.adopt_phrase(phrase).map_err(|e| match e {

@@ -143,7 +143,7 @@ impl SignupFlowJs {
             .collect())
     }
 
-    /// Take an existing recovery phrase instead of a new one; counts as confirmed.
+    /// Take an existing master key instead of a new one; counts as confirmed.
     #[wasm_bindgen(js_name = adoptPhrase)]
     pub fn adopt_phrase(&mut self, phrase: String) -> Result<(), JsError> {
         let phrase = Zeroizing::new(phrase);

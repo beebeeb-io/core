@@ -24,7 +24,7 @@
 //! and returns the same 32-byte PRF output (pinned by `test-vectors/passkey_vault.json`).
 //!
 //! There is no non-PRF fallback key: a passkey without PRF signs in but cannot unlock the vault (the password or the
-//! recovery phrase is still needed). Web's `localStorage` fallback is never ported.
+//! master key is still needed). Web's `localStorage` fallback is never ported.
 
 pub mod ceremony;
 pub mod flow;

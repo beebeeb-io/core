@@ -17,7 +17,7 @@ desktop), to WebAssembly (web), and to native mobile bindings (iOS, Android).
 
 | Crate | Purpose |
 | --- | --- |
-| `beebeeb-core` | Encryption, key derivation, recovery phrases, OPAQUE helpers, key exchange, the shared streaming chunk primitive, and sync protocol helpers. |
+| `beebeeb-core` | Encryption, key derivation, master keys, OPAQUE helpers, key exchange, the shared streaming chunk primitive, and sync protocol helpers. |
 | `beebeeb-types` | Shared serializable types: cipher-suite identifiers, encrypted-blob shapes, KDF parameters, chunk metadata, storage constants. |
 | `beebeeb-api` | I/O-free typed API descriptors, bounded answers, and account-flow types. |
 | `beebeeb-client` | Native transport, sessions, and authentication, file, sync, transfer, sharing, local-data, backup, and platform services. |

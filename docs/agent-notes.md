@@ -6,7 +6,7 @@ named there by a pointer line. This is the crypto and wire-format reference: rea
 
 ## Key types
 
-- `MasterKey` — 32 bytes, NOT Clone, zeroized on drop. Created from password (Argon2id) or recovery phrase.
+- `MasterKey` — 32 bytes, NOT Clone, zeroized on drop. Created from password (Argon2id) or master key.
 - `FileKey` — 32 bytes, per-file via HKDF. `derive_file_key(master_key, file_id)`. `EncryptedBlob` — cipher_suite + nonce (Vec<u8>) + ciphertext (Vec<u8>).
 - Owner per-file key conventions (SF-0002): `kdf::owner_file_key_for_name` tries the **string** id, then the legacy **binary** 16-byte UUID, then the read-only **upper_repair** (`UPPERCASE(id)`) convention, and reports which one won; `kdf::owner_file_key_for_content` does the same per content version from that version's first chunk frame. The shared readers (`decrypt_name_metadata`, `decrypt_file_metadata`, `decrypt_name_with_mime`) stay two-convention (string, then binary) — only the resolvers know `upper_repair`. A file is READ-ONLY if EITHER its name or ANY version reports `UpperRepair` — no rename, no new version, edits become a new file. Core never writes under it and never migrates a row.
 - Item id classes (task 2275, L12): `item_id::new_foreign_item_id()` mints a foreign (**F**) id — RFC 9562 UUID **v8**, RFC 4122 variant, 122 CSPRNG bits, canonical lowercase hyphenated text; `item_id::is_foreign_item_id` / `item_id::item_class` classify, and every other canonical UUID is an owner (**O**) id. Any other text form (uppercase, braced, unhyphenated) is `InvalidInput` — never treated as an owner id. F ids are never derived: their key comes from an L8 owner envelope or an L7 child wrap that also authenticates the name; O ids never use those envelopes/wraps. `owned_keys::resolve_owned_key` returns the key, its `KeyOrigin`, the resolved name and — only for a writable row — a `WriteTarget` (id + key + chunk-format pin). `DerivedUpperRepair` rows and 2236 request rows have **no** `WriteTarget` (read-only). `item_id::NewItemId` is minted by core only; new-row sealers are `*_for_new_item`, replacements `*_for_target`. L14: `owned_keys::child_wrap_matches` compares the opened wrap key in constant time.
@@ -388,7 +388,7 @@ Tests: `beebeeb-client/src/tests_svc_archives.rs`, against an in-process file se
 - MasterKey and FileKey are NOT Clone — prevents accidental key copies in memory
 - All intermediate key buffers use `Zeroizing<[u8; 32]>` — zeroed on drop
 - Each file gets its own key via HKDF(master_key, file_id) — limits blast radius
-- Recovery phrase IS the master secret — password wraps it, doesn't replace it
+- Master key IS the master secret — password wraps it, doesn't replace it
 - No panics in crypto paths — everything returns Result
 
 ## Path safety on Windows: short-name aliases (task 2404)

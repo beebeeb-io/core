@@ -26,18 +26,18 @@ pub struct RecoveryKitData {
 
 impl RecoveryKitData {
     pub fn filename_stem(&self) -> &'static str {
-        "keep-safe"
+        "beebeeb-master-key"
     }
 
     pub fn title(&self) -> &'static str {
-        "Your Beebeeb account safety key"
+        "Your Beebeeb master key"
     }
 
     pub fn warnings(&self) -> [&'static str; 3] {
         [
             "Keep this away from your password.",
             "Do not save it inside Beebeeb.",
-            "Anyone with these words may be able to recover your account.",
+            "Anyone with these words can open your vault.",
         ]
     }
 
@@ -47,7 +47,7 @@ impl RecoveryKitData {
 
     pub fn text_file(&self) -> Zeroizing<String> {
         let mut text = String::from(
-            "KEEP THIS AWAY FROM YOUR PASSWORD. DO NOT SAVE IT INSIDE BEEBEEB.\n\nYour Beebeeb account safety key:\n",
+            "KEEP THIS AWAY FROM YOUR PASSWORD. DO NOT SAVE IT INSIDE BEEBEEB.\n\nYour Beebeeb master key:\n",
         );
         text.push_str(&self.phrase);
         text.push('\n');

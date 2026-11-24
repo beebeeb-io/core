@@ -1,4 +1,4 @@
-//! Minimal PDF 1.4 generator for the recovery phrase kit.
+//! Minimal PDF 1.4 generator for the master key kit.
 //!
 //! Generates a single-page document with a title, body text (the 12 recovery
 //! words), and optional key-value metadata lines. Uses raw PDF construction
@@ -113,7 +113,7 @@ const MARGIN: f32 = 60.0;
 /// Generate a single-page recovery kit PDF.
 ///
 /// - `title`: large heading at the top (e.g. "Beebeeb Recovery Kit")
-/// - `words`: the 12 recovery words (displayed in a numbered 2-column grid)
+/// - `words`: the 12 master key words (displayed in a numbered 2-column grid)
 /// - `metadata`: key-value pairs displayed below the words (e.g. ("Email", "user@example.com"))
 ///
 /// Returns the raw PDF bytes.
@@ -207,7 +207,7 @@ fn build_content_stream(title: &str, words: &[String], metadata: &[(&str, &str)]
     stream.push_str("0 0 0 rg\n"); // reset color
     stream.push_str("ET\n");
 
-    // --- Recovery words: 2-column numbered grid ---
+    // --- Master key words: 2-column numbered grid ---
     let words_start_y = subtitle_y - 30.0;
     let word_size: f32 = 13.0;
     let line_height: f32 = 22.0;

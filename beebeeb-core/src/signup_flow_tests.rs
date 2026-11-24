@@ -23,8 +23,8 @@ fn policy(breach: bool) -> SignupPolicy {
     SignupPolicy::from_response(&ok(doc)).unwrap()
 }
 
-/// Drive the flow to a verified email and an accepted password.
-fn to_password(breach: bool) -> SignupFlow {
+/// Drive the flow to a verified email: the master key (12 words) comes next.
+fn to_verified(breach: bool) -> SignupFlow {
     let mut f = SignupFlow::new(policy(breach));
     let req = f.send_code(" Anna@Example.EU ").unwrap();
     assert_eq!(req.path, EMAIL_START_PATH);
@@ -33,6 +33,11 @@ fn to_password(breach: bool) -> SignupFlow {
     let req = f.verify_code("1234 5678").unwrap();
     assert_eq!(req.body.as_ref().unwrap()["code"], "12345678");
     f.on_code_verified(&ok(json!({ "signup_ticket": "tkt" }))).unwrap();
+    f
+}
+
+/// The password step, after the master key is confirmed or adopted.
+fn set_password(f: &mut SignupFlow, breach: bool) {
     let pw = "correct horse battery staple";
     if breach {
         let req = f.breach_request(pw).unwrap();
@@ -43,6 +48,13 @@ fn to_password(breach: bool) -> SignupFlow {
         );
     }
     f.set_password(pw, pw).unwrap();
+}
+
+/// Verified email, confirmed words, accepted password.
+fn to_password(breach: bool) -> SignupFlow {
+    let mut f = to_verified(breach);
+    confirm(&mut f);
+    set_password(&mut f, breach);
     f
 }
 
@@ -112,6 +124,12 @@ fn password_rules_come_from_the_ceremony() {
     let mut f = SignupFlow::new(policy(true));
     f.send_code("anna@example.eu").unwrap();
     f.on_code_verified(&ok(json!({ "signup_ticket": "t" }))).unwrap();
+    // The master key comes first: the password step is closed until the words are confirmed.
+    assert_eq!(
+        f.set_password("long enough pass", "long enough pass").unwrap_err(),
+        SignupError::WrongState
+    );
+    confirm(&mut f);
     assert_eq!(
         f.set_password("short pw", "short pw").unwrap_err(),
         SignupError::PasswordTooShort { missing: 4 }
@@ -143,7 +161,7 @@ fn password_rules_come_from_the_ceremony() {
 
 #[test]
 fn wrong_words_do_not_pass() {
-    let mut f = to_password(false);
+    let mut f = to_verified(false);
     f.phrase_words().unwrap();
     f.acknowledge_phrase().unwrap();
     assert_eq!(
@@ -157,8 +175,11 @@ fn wrong_words_do_not_pass() {
 }
 
 #[test]
-fn registration_needs_the_phrase_confirmed() {
-    let mut f = to_password(false);
+fn registration_needs_the_master_key_confirmed() {
+    let mut f = to_verified(false);
+    assert!(f.register_start().is_err());
+    f.phrase_words().unwrap();
+    f.acknowledge_phrase().unwrap();
     assert!(f.register_start().is_err());
 }
 
@@ -166,7 +187,6 @@ fn registration_needs_the_phrase_confirmed() {
 fn full_signup_against_a_mock_server() {
     let setup = opaque_protocol::create_server_setup();
     let mut f = to_password(true);
-    confirm(&mut f);
     let req = f.register_start().unwrap();
     assert_eq!(req.path, REGISTER_START_PATH);
     let body = req.body.unwrap();
@@ -204,7 +224,6 @@ fn full_signup_against_a_mock_server() {
 #[test]
 fn an_expired_ticket_goes_back_to_verify_and_keeps_the_phrase() {
     let mut f = to_password(false);
-    confirm(&mut f);
     f.register_start().unwrap();
     let refused = HttpResponse::new(403, json!({ "error": "signup_ticket_invalid" }));
     assert_eq!(f.on_register_start(&refused).unwrap_err(), SignupError::TicketExpired);
@@ -219,7 +238,6 @@ fn an_expired_ticket_goes_back_to_verify_and_keeps_the_phrase() {
 #[test]
 fn a_server_failure_lets_the_person_try_again() {
     let mut f = to_password(false);
-    confirm(&mut f);
     f.register_start().unwrap();
     assert_eq!(
         f.on_register_start(&HttpResponse::new(500, json!({}))).unwrap_err(),
@@ -230,7 +248,7 @@ fn a_server_failure_lets_the_person_try_again() {
 
 #[test]
 fn debug_prints_hold_no_secret() {
-    let mut f = to_password(false);
+    let mut f = to_verified(false);
     let words = f.phrase_words().unwrap();
     let dbg = format!("{f:?}");
     assert!(!dbg.contains("tkt"));
@@ -269,8 +287,9 @@ fn adopted_phrase_registers_with_the_keys_that_phrase_gives() {
     let (phrase, _) = crate::recovery::generate_recovery_phrase().unwrap();
     let want = crate::recovery::recover_from_phrase(&phrase).unwrap();
     let setup = opaque_protocol::create_server_setup();
-    let mut f = to_password(false);
+    let mut f = to_verified(false);
     f.adopt_phrase(&phrase).unwrap();
+    set_password(&mut f, false);
     let req = f.register_start().unwrap();
     let body = req.body.unwrap();
     let msg = b64().decode(body["client_message"].as_str().unwrap()).unwrap();
@@ -294,14 +313,14 @@ fn adopted_phrase_registers_with_the_keys_that_phrase_gives() {
 fn adopt_accepts_capitals_newline_and_nbsp() {
     let (phrase, _) = crate::recovery::generate_recovery_phrase().unwrap();
     let messy = phrase.to_uppercase().replacen(' ', "\n", 1).replacen(' ', "\u{a0}", 1);
-    to_password(false).adopt_phrase(&messy).unwrap();
+    to_verified(false).adopt_phrase(&messy).unwrap();
 }
 
 #[test]
 fn adopt_refuses_a_bad_checksum() {
     let bad = ["abandon"; 12].join(" ");
     assert!(matches!(
-        to_password(false).adopt_phrase(&bad),
+        to_verified(false).adopt_phrase(&bad),
         Err(SignupError::InvalidPhrase)
     ));
 }
@@ -310,6 +329,5 @@ fn adopt_refuses_a_bad_checksum() {
 fn adopt_after_confirm_is_refused() {
     let (phrase, _) = crate::recovery::generate_recovery_phrase().unwrap();
     let mut f = to_password(false);
-    confirm(&mut f);
     assert!(matches!(f.adopt_phrase(&phrase), Err(SignupError::WrongState)));
 }

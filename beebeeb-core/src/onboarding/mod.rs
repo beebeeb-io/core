@@ -6,8 +6,8 @@
 //! - [`password`]: policy evaluator driven by the server's numbers.
 //! - [`breach`]: k-anonymity breached-password helper (hashing and matching
 //!   only; the HTTP call stays in each client).
-//! - [`ceremony`]: the signup state machine over the existing recovery-phrase
-//!   and OPAQUE primitives.
+//! - [`ceremony`]: the signup state machine over the existing master-key (12 words)
+//!   (the master key first, then the password) and OPAQUE primitives.
 //!
 //! Nothing here performs I/O and nothing here implements a new cryptographic
 //! primitive. Exposed to web through `beebeeb-wasm` and to iOS/Android/desktop
@@ -21,8 +21,8 @@ pub use breach::{
     BreachCheck, BreachError, BreachQuery, BreachResponse, BreachVerdict, MAX_BODY_BYTES, evaluate_breach_response,
 };
 pub use ceremony::{
-    BreachPolicy, CeremonyConfig, CeremonyError, CeremonyStep, RegistrationFinish, RegistrationStart, SignupCeremony,
-    VERIFY_WORD_COUNT_FLOOR,
+    BreachPolicy, CeremonyConfig, CeremonyError, CeremonyStep, PRE_ACCOUNT_CEREMONY_ORDER, RegistrationFinish,
+    RegistrationStart, SignupCeremony, VERIFY_WORD_COUNT_FLOOR,
 };
 pub use password::{
     MIN_LENGTH_FLOOR, PasswordEvaluation, PasswordHint, PasswordPolicy, PasswordStrength, evaluate_password,

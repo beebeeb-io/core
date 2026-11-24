@@ -95,7 +95,7 @@ App and whole-device sign-out therefore remain distinct coordinator operations.
 
 Password sign-in on a device returns a locked `PasswordAcceptedHandle` after any authenticator step;
 it has no retained-password or login-email-code retry state. The next path is QR/typed device approval,
-passkey plus an email code, or recovery key plus an email code. Every path finishes with account-key
+passkey plus an email code, or master key plus an email code. Every path finishes with account-key
 proof; the passkey and recovery paths submit their email ticket only at proof finish.
 `create_passkey_copy`, `open_with_passkey`, QR approval and
 typed approval take the account and key from `NativeClientHandle` instead of accepting caller-supplied

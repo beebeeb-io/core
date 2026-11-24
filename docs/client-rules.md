@@ -30,7 +30,7 @@ deduplication; sharing, contact keys, file requests, and search; limits, retry g
 A platform draws UI, maps typed errors to wording, performs requested OS work such as background
 transfer or image encoding, reports the outcome, and renders core events.
 
-Sign-up can adopt an existing recovery phrase (an offline Pass vault's) with `SignupFlow::adopt_phrase`
+Sign-up can adopt an existing master key (an offline Pass vault's) with `SignupFlow::adopt_phrase`
 instead of generating one: core normalizes and checks it, derives the master key, `x25519` key and
 `recovery_check` from it, and treats it as confirmed. A client passes the typed words and nothing else.
 
@@ -42,7 +42,7 @@ thumbnails, sharing, contacts, search, settings, backup, File Provider, and coor
 Applications must not retain an account key or session token alongside those services.
 
 Password acceptance, after any configured authenticator, produces a locked session. A new device then
-uses exactly one account-key source: device approval, passkey plus email code, or recovery key plus
+uses exactly one account-key source: device approval, passkey plus email code, or master key plus
 email code. Account-key proof runs before the session is installed. The email ticket belongs to key
 proof, not the password request. Signup is web-only; native clients surface the typed web URL.
 
