@@ -116,7 +116,7 @@ fn main() {
         "expected_envelope_hex": hex(&envelope_bytes),
     }));
 
-    // Vector 8: Recovery phrase
+    // Vector 8: Master key
     let (phrase, recovered_mk) = generate_recovery_phrase().unwrap();
     let re_recovered = recover_from_phrase(&phrase).unwrap();
     assert_eq!(&recovered_mk.to_bytes(), &re_recovered.to_bytes());

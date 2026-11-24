@@ -3,7 +3,7 @@
 //! This crate defines the canonical data structures and constants used across
 //! every layer of the Beebeeb stack:
 //!
-//! - **`beebeeb-core`** — encryption, key derivation, recovery phrases
+//! - **`beebeeb-core`** — encryption, key derivation, master keys
 //! - **`beebeeb-wasm`** — WebAssembly bindings for the web client
 //! - **`beebeeb-uniffi`** — native bindings for iOS/Android via UniFFI
 //! - **`beebeeb-sync`** — desktop file sync engine

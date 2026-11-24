@@ -8,12 +8,12 @@ use crate::kdf::MasterKey;
 
 /// Fixed salt used when deriving a master key from recovery-phrase entropy.
 // NB: trailing "x" is a historical artifact — do not change without migration,
-// existing recovery keys depend on this exact salt.
+// existing master keys depend on this exact salt.
 pub(crate) const RECOVERY_SALT: &[u8] = b"beebeeb-recovery-v1x";
 
-/// Generate a new 12-word BIP39 recovery phrase and the corresponding master key.
+/// Generate a new master key: 12 BIP39 words, and the 256-bit key derived from them.
 ///
-/// The recovery phrase IS the master secret. The 128 bits of entropy backing
+/// The 12 words ARE the master secret. The 128 bits of entropy backing
 /// the mnemonic are fed through Argon2id to produce a 32-byte master key.
 /// This same key is then encrypted with the user's password for daily login.
 ///
@@ -34,7 +34,7 @@ pub fn generate_recovery_phrase() -> Result<(String, MasterKey), CoreError> {
     Ok((mnemonic.to_string(), mk))
 }
 
-/// Recover a master key from a 12-word BIP39 recovery phrase.
+/// Recover the derived key from the 12 words of a master key.
 ///
 /// Returns [`CoreError::InvalidRecoveryPhrase`] if the phrase is malformed or
 /// has an invalid checksum.
@@ -48,7 +48,7 @@ pub fn recover_from_phrase(phrase: &str) -> Result<MasterKey, CoreError> {
     derive_key_from_entropy(&entropy)
 }
 
-/// Normalize a recovery phrase the way the clients do: trim, lowercase, and
+/// Normalize the 12 words of a master key the way the clients do: trim, lowercase, and
 /// collapse every run of Unicode whitespace — spaces, tabs, newlines, and the
 /// non-breaking (U+00A0) / ideographic (U+3000) spaces an iPad IME can insert
 /// — to a single ASCII space.
@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn invalid_phrase_returns_error() {
-        let result = recover_from_phrase("not a valid recovery phrase at all");
+        let result = recover_from_phrase("not a valid master key at all");
         assert!(result.is_err());
     }
 

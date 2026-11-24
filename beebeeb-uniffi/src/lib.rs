@@ -573,7 +573,7 @@ pub struct OpaqueLoginFinishResult {
     pub export_key: Vec<u8>,
 }
 
-/// Result of generating a recovery phrase.
+/// Result of generating a master key.
 #[derive(uniffi::Record)]
 pub struct RecoveryPhraseResult {
     pub phrase: String,

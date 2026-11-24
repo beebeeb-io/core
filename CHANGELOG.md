@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Sign-up creates the master key first, then the password: `SignupCeremony::set_password` is refused with `StepNotDone` until the 12 words are confirmed or adopted; new `PRE_ACCOUNT_CEREMONY_ORDER` (wasm `ceremonyStepOrder`, uniffi `ceremony_step_order`); `CeremonyStep` order is now verify email, save, confirm, password, create. Texts, the master key kit (title "Your Beebeeb master key") and docs say "master key" for the 12 words; identifiers, error codes and wire strings are unchanged.
+
 ### Added
 - `beebeeb-transfer`, the L2 driver crate for direct S3 downloads (task 2173, plan K2):
   `download()` drives core's `DownloadPlanner` over any `DirectIo` transport (API calls,
