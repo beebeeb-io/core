@@ -22,8 +22,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    backup, chunk_stream, cli_auth, client_meta, device_link, encrypt, file_request, folder_key, item_id, kdf,
-    key_proof, local_seal, pair_kdf, passkey, passkey_seal, product_keys, recovery, screen_lock, transfer,
+    backup, chunk_stream, cli_auth, client_meta, device_link, encrypt, file_request, folder_digest, folder_key,
+    item_id, kdf, key_proof, local_seal, pair_kdf, passkey, passkey_seal, product_keys, recovery, screen_lock,
+    transfer,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -474,11 +475,34 @@ const LABELS: &[Label] = &[
         Slot::Info,
         "pair key, connection-nonce salt -> app-to-extension channel key",
     ),
+    // folder digest: BLAKE3 `derive_key` contexts (str consts, not `b"..."` literals)
+    label(
+        "folder_digest::DIGEST_CONTEXT",
+        folder_digest::DIGEST_CONTEXT.as_bytes(),
+        Slot::Salt,
+        "BLAKE3 derive_key context: count || child records",
+    ),
+    label(
+        "folder_digest::NAME_HASH_CONTEXT",
+        folder_digest::NAME_HASH_CONTEXT.as_bytes(),
+        Slot::Salt,
+        "BLAKE3 derive_key context: name ciphertext string",
+    ),
 ];
+
+/// Table labels that are `&str` consts (BLAKE3 `derive_key` contexts), so the
+/// completeness scan for `b"beebeeb` literals cannot see them.
+const STR_CONTEXT_LABELS: &[&str] = &["folder_digest::DIGEST_CONTEXT", "folder_digest::NAME_HASH_CONTEXT"];
 
 /// Every pair where one label is a prefix of another, with why it is not a
 /// confusion. `every_prefix_pair_is_documented` requires this list to be exact.
 const CROSS_SLOT_PREFIX_PAIRS: &[(&str, &str, &str)] = &[
+    (
+        "folder_digest::DIGEST_CONTEXT",
+        "folder_digest::NAME_HASH_CONTEXT",
+        "both are BLAKE3 derive_key contexts, never an HKDF info; derive_key hashes the context to a key, so the \
+         shorter context being a prefix of the longer gives unrelated keys",
+    ),
     (
         "chunk_stream::CHUNK_AAD_DOMAIN_V2",
         "chunk_stream::CHUNK_KEY_INFO_V2",
@@ -548,7 +572,7 @@ fn find(name: &str) -> &'static Label {
 
 #[test]
 fn every_label_is_distinct_and_no_id_carrying_info_is_a_prefix_of_another_info() {
-    assert_eq!(LABELS.len(), 65, "a label was added or removed: review the slot rules");
+    assert_eq!(LABELS.len(), 67, "a label was added or removed: review the slot rules");
     for (i, a) in LABELS.iter().enumerate() {
         assert!(!a.with.is_empty());
         for b in &LABELS[i + 1..] {
@@ -711,7 +735,7 @@ fn the_table_lists_every_label_literal_in_the_crate() {
             seen.insert(literal);
         }
     }
-    for l in LABELS {
+    for l in LABELS.iter().filter(|l| !STR_CONTEXT_LABELS.contains(&l.name)) {
         assert!(
             seen.contains(l.bytes),
             "{} is listed but is not a literal in src/",

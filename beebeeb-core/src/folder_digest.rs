@@ -45,20 +45,67 @@ pub enum ChildKind {
 
 /// One child of a folder, as it enters the digest.
 ///
-/// A file: the server's row as it is, also while `uploading` (a new version's
-/// init already changes size and version); `folder_digest` None.
-/// A folder: `uploading` false, size 0, version 0, object version None,
-/// `folder_digest` Some(that folder's digest).
+/// A file: the server's row as it is, also while `uploading`;
+/// `folder_digest` None. A folder: `uploading` false, `owner_wrap_present`
+/// false, size 0, version 0, object version None, `folder_digest` Some(that
+/// folder's digest).
+///
+/// Build one with [`ChildRecord::file`] or [`ChildRecord::folder`]. The folder
+/// rule is also structural: [`encode_record`] writes those folder values (and a
+/// zero folder digest for a file) whatever the fields hold, so a server that
+/// passes a folder row's `version_number` DEFAULT 1 still matches a client.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChildRecord {
     pub id: Uuid,
     pub kind: ChildKind,
     pub uploading: bool,
+    /// The row's `owner_wrapped_file_key` is non-null (flags bit 1).
+    pub owner_wrap_present: bool,
     pub size_bytes: i64,
     pub version_number: i64,
     pub object_version_id: Option<Uuid>,
     pub name_hash: [u8; 32],
     pub folder_digest: Option<Digest>,
+}
+
+impl ChildRecord {
+    /// A file child: the row's values as they are.
+    pub fn file(
+        id: Uuid,
+        uploading: bool,
+        owner_wrap_present: bool,
+        size_bytes: i64,
+        version_number: i64,
+        object_version_id: Option<Uuid>,
+        name_hash: [u8; 32],
+    ) -> Self {
+        Self {
+            id,
+            kind: ChildKind::File,
+            uploading,
+            owner_wrap_present,
+            size_bytes,
+            version_number,
+            object_version_id,
+            name_hash,
+            folder_digest: None,
+        }
+    }
+
+    /// A folder child with the folder's own digest.
+    pub fn folder(id: Uuid, name_hash: [u8; 32], folder_digest: Digest) -> Self {
+        Self {
+            id,
+            kind: ChildKind::Folder,
+            uploading: false,
+            owner_wrap_present: false,
+            size_bytes: 0,
+            version_number: 0,
+            object_version_id: None,
+            name_hash,
+            folder_digest: Some(folder_digest),
+        }
+    }
 }
 
 /// BLAKE3 `derive_key(NAME_HASH_CONTEXT)` over the UTF-8 bytes of the name
@@ -70,25 +117,31 @@ pub fn name_hash(name_encrypted: &str) -> [u8; 32] {
 }
 
 /// The 114-byte record: kind u8 (1 file, 2 folder) | flags u8 (bit 0 =
-/// uploading) | id 16 | size_bytes i64 BE | version_number i64 BE |
+/// uploading, bit 1 = owner wrap present) | id 16 | size_bytes i64 BE | version_number i64 BE |
 /// object_version_id 16 (zeros when None) | name_hash 32 | folder_digest 32
-/// (zeros when None).
+/// (zeros when None). Normalised by kind: a folder writes flags 0, size 0,
+/// version 0 and no object version whatever the fields hold; a file writes a
+/// zero folder digest.
 pub fn encode_record(r: &ChildRecord) -> [u8; RECORD_LEN] {
+    let is_folder = r.kind == ChildKind::Folder;
     let mut out = [0u8; RECORD_LEN];
-    out[0] = match r.kind {
-        ChildKind::File => 1,
-        ChildKind::Folder => 2,
-    };
-    out[1] = u8::from(r.uploading);
+    out[0] = if is_folder { 2 } else { 1 };
+    if !is_folder {
+        out[1] = u8::from(r.uploading) | (u8::from(r.owner_wrap_present) << 1);
+    }
     out[2..18].copy_from_slice(r.id.as_bytes());
-    out[18..26].copy_from_slice(&r.size_bytes.to_be_bytes());
-    out[26..34].copy_from_slice(&r.version_number.to_be_bytes());
-    if let Some(ov) = r.object_version_id {
-        out[34..50].copy_from_slice(ov.as_bytes());
+    if !is_folder {
+        out[18..26].copy_from_slice(&r.size_bytes.to_be_bytes());
+        out[26..34].copy_from_slice(&r.version_number.to_be_bytes());
+        if let Some(ov) = r.object_version_id {
+            out[34..50].copy_from_slice(ov.as_bytes());
+        }
     }
     out[50..82].copy_from_slice(&r.name_hash);
-    if let Some(d) = r.folder_digest {
-        out[82..114].copy_from_slice(&d);
+    if is_folder {
+        if let Some(d) = r.folder_digest {
+            out[82..114].copy_from_slice(&d);
+        }
     }
     out
 }
@@ -98,6 +151,10 @@ pub fn encode_record(r: &ChildRecord) -> [u8; RECORD_LEN] {
 /// children are given in does not matter.
 pub fn folder_digest(mut children: Vec<ChildRecord>) -> Digest {
     children.sort_unstable_by(|a, b| a.id.as_bytes().cmp(b.id.as_bytes()));
+    debug_assert!(
+        children.windows(2).all(|w| w[0].id != w[1].id),
+        "folder_digest: child ids must be unique"
+    );
     let mut h = blake3::Hasher::new_derive_key(DIGEST_CONTEXT);
     h.update(&(children.len() as u64).to_be_bytes());
     for c in &children {
@@ -166,6 +223,7 @@ mod tests {
                 other => panic!("bad kind {other:?}"),
             },
             uploading: v["uploading"].as_bool().unwrap(),
+            owner_wrap_present: v["owner_wrap_present"].as_bool().unwrap_or(false),
             size_bytes: v["size_bytes"].as_i64().unwrap(),
             version_number: v["version_number"].as_i64().unwrap(),
             object_version_id: (!v["object_version_id"].is_null()).then(|| uuid(&v["object_version_id"])),
@@ -241,16 +299,11 @@ mod tests {
         for c in node["children"].as_array().unwrap() {
             if c["kind"] == "folder" {
                 let d = walk(c, out);
-                kids.push(ChildRecord {
-                    id: uuid(&c["id"]),
-                    kind: ChildKind::Folder,
-                    uploading: false,
-                    size_bytes: 0,
-                    version_number: 0,
-                    object_version_id: None,
-                    name_hash: name_hash(c["name_encrypted"].as_str().unwrap()),
-                    folder_digest: Some(d),
-                });
+                kids.push(ChildRecord::folder(
+                    uuid(&c["id"]),
+                    name_hash(c["name_encrypted"].as_str().unwrap()),
+                    d,
+                ));
             } else {
                 kids.push(child(c));
             }
@@ -273,6 +326,42 @@ mod tests {
                 assert_eq!(to_hex(&got[id]), hex.as_str().unwrap(), "folder {id}");
             }
         }
+    }
+
+    #[test]
+    fn folder_digest_a_folder_row_with_file_values_encodes_as_a_folder() {
+        let id = Uuid::from_u128(7);
+        let nh = name_hash("n");
+        let d = [9u8; 32];
+        let mut row = ChildRecord::folder(id, nh, d);
+        row.uploading = true;
+        row.owner_wrap_present = true;
+        row.size_bytes = 5;
+        row.version_number = 1; // the column DEFAULT
+        row.object_version_id = Some(Uuid::from_u128(8));
+        assert_eq!(encode_record(&row), encode_record(&ChildRecord::folder(id, nh, d)));
+        let mut file = ChildRecord::file(id, false, false, 1, 1, None, nh);
+        file.folder_digest = Some(d);
+        assert_eq!(
+            encode_record(&file),
+            encode_record(&ChildRecord::file(id, false, false, 1, 1, None, nh))
+        );
+    }
+
+    #[test]
+    fn folder_digest_owner_wrap_bit_changes_the_digest() {
+        let mk = |wrap| {
+            vec![ChildRecord::file(
+                Uuid::from_u128(1),
+                false,
+                wrap,
+                1,
+                1,
+                None,
+                name_hash("n"),
+            )]
+        };
+        assert_ne!(folder_digest(mk(false)), folder_digest(mk(true)));
     }
 
     #[test]

@@ -13,8 +13,8 @@ Code: `beebeeb-core/src/folder_digest.rs`. Wire types: `beebeeb-types/src/folder
 
 This is a wire format between every client and the server. Once v1 ships, its bytes, contexts, sort order and
 child set stay as written here. A change is a v2: new derive-key contexts, a new algorithm string, new vectors,
-and the server sending the algorithm it computed. The two contexts are BLAKE3 `derive_key` contexts, not HKDF
-labels, so they are not in `label_table_tests.rs` (that table lists the `b"beebeeb…"` HKDF, AAD and salt labels).
+and the server sending the algorithm it computed. The two contexts are BLAKE3 `derive_key` contexts (the hash
+domain prefix slot); both are in `label_table_tests.rs`.
 
 ## The definition
 
@@ -28,7 +28,7 @@ All hashing is BLAKE3 in its key-derivation mode, `derive_key(context, input)`, 
   | Offset | Bytes | Field |
   |---|---|---|
   | 0 | 1 | kind: 1 file, 2 folder |
-  | 1 | 1 | flags: bit 0 = uploading, other bits 0 |
+  | 1 | 1 | flags: bit 0 = uploading, bit 1 = owner wrap present (`owner_wrapped_file_key` is non-null), other bits 0 |
   | 2 | 16 | id (the UUID's 16 bytes, `Uuid::as_bytes`) |
   | 18 | 8 | size_bytes, i64 big-endian |
   | 26 | 8 | version_number, i64 big-endian |
@@ -36,6 +36,10 @@ All hashing is BLAKE3 in its key-derivation mode, `derive_key(context, input)`, 
   | 50 | 32 | name hash |
   | 82 | 32 | the child folder's digest; zeros for a file |
 
+- **None and zero encode the same.** An absent object version id and an absent folder digest are written as 16 and
+  32 zero bytes; there is no separate flag. That is safe because no real object version id is the nil UUID
+  (they are random v4 ids) and no real digest is all zeros (a BLAKE3 output), so the two cases never collide
+  with a real value.
 - **Folder digest** (`folder_digest`): `derive_key("beebeeb folder digest v1", count || records)` where `count` is
   the number of children as a u64 big-endian and `records` are the children's records sorted by id bytes
   ascending. The input order does not matter.
@@ -44,10 +48,24 @@ All hashing is BLAKE3 in its key-derivation mode, `derive_key(context, input)`, 
   digest.
 - **Hex** on the wire: 64 lowercase characters (`to_hex`); `from_hex` takes exactly that form and nothing else.
 
-A file's record is the server's row as it is, also while it is uploading: a new version's init already changes
-size and version, so the digest changes then and again when the upload completes. A folder's record has
-uploading false, size 0, version 0, no object version, and its own digest, so a change anywhere below a folder
-changes every digest on the path to the root.
+A file's record is the server's row as it is, also while it is uploading: the row's `size_bytes` and
+`version_number` are written in `uploads/complete`, not at init, so the digest changes when the upload completes
+(the uploading flag and any new object version id change it earlier). Bit 1 follows `owner_wrapped_file_key`, so
+adopting an owner key changes the digest. A folder's record has flags 0, size 0, version 0, no object version,
+and its own digest, so a change anywhere below a folder changes every digest on the path to the root. This is
+structural: `ChildRecord::file` and `ChildRecord::folder` build the records, and `encode_record` writes the
+folder values for a folder whatever the row holds (a folder row's `version_number` DEFAULT 1 is ignored). Child
+ids are unique within a folder; `folder_digest` debug-asserts it.
+
+Sizes and versions are full i64 big-endian; the vectors cover sizes at and above 2^32 and 2^53, and versions
+above 255. Names are hashed as the raw UTF-8 bytes of the stored string, with no Unicode normalisation: the NFC
+and NFD spellings of the same text are different names and different digests.
+
+## Backfill before serving
+
+The server must finish computing every folder's digest before the endpoint is served. A folder with no digest row
+is read as `EMPTY`, which is only right for a folder with no children: a non-empty folder without a row would show
+`EMPTY` and a client would skip it.
 
 ## The child set
 
