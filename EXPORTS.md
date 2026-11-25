@@ -111,6 +111,14 @@ directly (the desktop engine). Neither `beebeeb-uniffi` nor `beebeeb-wasm` expor
 `local_seal` or `ScratchKey` appears in their sources: `ScratchKey` has no byte accessor, no `Clone` and no
 serialise path, so no key can cross an FFI boundary.
 
+## Folder digests (Rust only, no binding export yet)
+
+`beebeeb_core::folder_digest` (spec `docs/folder-digest.md`, vectors `test-vectors/folder_digest_v1.json`):
+`ALGORITHM`, `DIGEST_CONTEXT`, `NAME_HASH_CONTEXT`, `RECORD_LEN`, `Digest`, `EMPTY`, `ChildKind`, `ChildRecord`,
+`name_hash`, `encode_record`, `folder_digest`, `to_hex` and `from_hex`. `beebeeb_types::folder_digest`:
+`FolderDigestPage` and `FolderDigestChild`, the wire types of `GET /api/v1/folder-digests`. The server and the
+desktop engine link them directly; the uniffi and wasm exports are the mobile and web follow-ups.
+
 ## Legacy UniFFI feature
 
 `legacy-bindings` is off by default and is the only feature that links `beebeeb-upload`. It retains the

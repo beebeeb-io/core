@@ -1,0 +1,541 @@
+{
+  "algorithm": "bb-folder-digest-v1",
+  "description": "Folder digest v1 vectors (docs/folder-digest.md). Child records give name_encrypted; name_hash is BLAKE3 derive_key(name_context) over its UTF-8 bytes. Expected values come from an independent pure-Python BLAKE3.",
+  "name_context": "beebeeb folder digest v1 name",
+  "digest_context": "beebeeb folder digest v1",
+  "empty": "db890c62967d99016e43cbf649ab13075e3d1b6b94d791b9071ed95be0a58795",
+  "name_hashes": [
+    {
+      "name_encrypted": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj+/8=",
+      "name_hash": "e53d02757dab02c0986bbde45077b4b52216a3bb7564d3701385f2bc517c9e23"
+    },
+    {
+      "name_encrypted": "v1:9yJ0YWciOiJuYW1lIn0.Qm9vay0yMDI2LnBkZg==",
+      "name_hash": "023a1797d1ddd51f1b3ffb8dd2618087bbf0ee1ea29f705b10dd1c04cafeb5e5"
+    },
+    {
+      "name_encrypted": "BQUFBQUFBQUFBQUF/+/+aGVsbG8gd29ybGQ=",
+      "name_hash": "fa17cb6b4ea469cec3f2def13da8776e11cde48f3a6411cfe38ed2caafe99e9f"
+    },
+    {
+      "name_encrypted": "v1:Zm9sZGVyLW5hbWU.c3Vic2Vjb25k",
+      "name_hash": "6cac81d8e15025eb6f6b5623a2eeae3a28a03fa942f135f2dc86147e9f562c04"
+    },
+    {
+      "name_encrypted": "{\"v\":2,\"n\":\"AAAA\",\"c\":\"8J+QnQ==\"}",
+      "name_hash": "2fe96b4a4262425adf87c19b847c6ed939313a3ee75403e058a4d8a101640bc6"
+    },
+    {
+      "name_encrypted": "",
+      "name_hash": "633612ae03516b441ecd1cd90e459b236199165de2228b56c656cb0dda57a7d6"
+    }
+  ],
+  "records": [
+    {
+      "child": {
+        "id": "f01de000-0000-4000-8000-000000000101",
+        "kind": "file",
+        "uploading": false,
+        "size_bytes": 1048576,
+        "version_number": 1,
+        "object_version_id": "f01de000-0000-4000-8000-000000000901",
+        "name_encrypted": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj+/8=",
+        "folder_digest": null
+      },
+      "encoded": "0100f01de00000004000800000000000010100000000001000000000000000000001f01de000000040008000000000000901e53d02757dab02c0986bbde45077b4b52216a3bb7564d3701385f2bc517c9e230000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "child": {
+        "id": "f01de000-0000-4000-8000-000000000102",
+        "kind": "file",
+        "uploading": true,
+        "size_bytes": 0,
+        "version_number": 1,
+        "object_version_id": null,
+        "name_encrypted": "v1:9yJ0YWciOiJuYW1lIn0.Qm9vay0yMDI2LnBkZg==",
+        "folder_digest": null
+      },
+      "encoded": "0101f01de0000000400080000000000001020000000000000000000000000000000100000000000000000000000000000000023a1797d1ddd51f1b3ffb8dd2618087bbf0ee1ea29f705b10dd1c04cafeb5e50000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "child": {
+        "id": "f01de000-0000-4000-8000-000000000202",
+        "kind": "folder",
+        "uploading": false,
+        "size_bytes": 0,
+        "version_number": 0,
+        "object_version_id": null,
+        "name_encrypted": "v1:Zm9sZGVyLW5hbWU.c3Vic2Vjb25k",
+        "folder_digest": "7adcc920333b1062edba1b3cfbcb738065dca54b576221ea5b4a2df3ab6c3219"
+      },
+      "encoded": "0200f01de00000004000800000000000020200000000000000000000000000000000000000000000000000000000000000006cac81d8e15025eb6f6b5623a2eeae3a28a03fa942f135f2dc86147e9f562c047adcc920333b1062edba1b3cfbcb738065dca54b576221ea5b4a2df3ab6c3219"
+    }
+  ],
+  "folders": [
+    {
+      "name": "empty",
+      "children": [],
+      "digest": "db890c62967d99016e43cbf649ab13075e3d1b6b94d791b9071ed95be0a58795"
+    },
+    {
+      "name": "one_file",
+      "children": [
+        {
+          "id": "f01de000-0000-4000-8000-000000000101",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 1048576,
+          "version_number": 1,
+          "object_version_id": "f01de000-0000-4000-8000-000000000901",
+          "name_encrypted": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj+/8=",
+          "folder_digest": null
+        }
+      ],
+      "digest": "0be6816153f69f630366d9a669d0c77beac6fa6dc4540e940ea7d99ea03ab275"
+    },
+    {
+      "name": "one_uploading_file",
+      "children": [
+        {
+          "id": "f01de000-0000-4000-8000-000000000102",
+          "kind": "file",
+          "uploading": true,
+          "size_bytes": 0,
+          "version_number": 1,
+          "object_version_id": null,
+          "name_encrypted": "v1:9yJ0YWciOiJuYW1lIn0.Qm9vay0yMDI2LnBkZg==",
+          "folder_digest": null
+        }
+      ],
+      "digest": "6cbab34b749d8de0374c9c5d01fd3778047b1d93c37ed89d1145e227fb5006a5"
+    },
+    {
+      "name": "file_and_subfolder",
+      "children": [
+        {
+          "id": "f01de000-0000-4000-8000-000000000101",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 1048576,
+          "version_number": 1,
+          "object_version_id": "f01de000-0000-4000-8000-000000000901",
+          "name_encrypted": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj+/8=",
+          "folder_digest": null
+        },
+        {
+          "id": "f01de000-0000-4000-8000-000000000202",
+          "kind": "folder",
+          "uploading": false,
+          "size_bytes": 0,
+          "version_number": 0,
+          "object_version_id": null,
+          "name_encrypted": "v1:Zm9sZGVyLW5hbWU.c3Vic2Vjb25k",
+          "folder_digest": "7adcc920333b1062edba1b3cfbcb738065dca54b576221ea5b4a2df3ab6c3219"
+        }
+      ],
+      "digest": "9b5e4fb29955167a4d7ca74c2aa5d1a0aaea72de60bce1540654029d5d7ddd07"
+    },
+    {
+      "name": "order_a",
+      "children": [
+        {
+          "id": "f01de000-0000-4000-8000-000000000121",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 10,
+          "version_number": 1,
+          "object_version_id": "f01de000-0000-4000-8000-000000000921",
+          "name_encrypted": "BQUFBQUFBQUFBQUF/+/+aGVsbG8gd29ybGQ=",
+          "folder_digest": null
+        },
+        {
+          "id": "f01de000-0000-4000-8000-000000000122",
+          "kind": "folder",
+          "uploading": false,
+          "size_bytes": 0,
+          "version_number": 0,
+          "object_version_id": null,
+          "name_encrypted": "v1:Zm9sZGVyLW5hbWU.c3Vic2Vjb25k",
+          "folder_digest": "db890c62967d99016e43cbf649ab13075e3d1b6b94d791b9071ed95be0a58795"
+        },
+        {
+          "id": "f01de000-0000-4000-8000-000000000120",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 7,
+          "version_number": 4,
+          "object_version_id": "f01de000-0000-4000-8000-000000000920",
+          "name_encrypted": "{\"v\":2,\"n\":\"AAAA\",\"c\":\"8J+QnQ==\"}",
+          "folder_digest": null
+        }
+      ],
+      "digest": "3b8a9be6fe918b9b2f71669e59726b44659a86b1f2b16f2fcb250ecd854818dd"
+    },
+    {
+      "name": "order_b",
+      "children": [
+        {
+          "id": "f01de000-0000-4000-8000-000000000120",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 7,
+          "version_number": 4,
+          "object_version_id": "f01de000-0000-4000-8000-000000000920",
+          "name_encrypted": "{\"v\":2,\"n\":\"AAAA\",\"c\":\"8J+QnQ==\"}",
+          "folder_digest": null
+        },
+        {
+          "id": "f01de000-0000-4000-8000-000000000121",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 10,
+          "version_number": 1,
+          "object_version_id": "f01de000-0000-4000-8000-000000000921",
+          "name_encrypted": "BQUFBQUFBQUFBQUF/+/+aGVsbG8gd29ybGQ=",
+          "folder_digest": null
+        },
+        {
+          "id": "f01de000-0000-4000-8000-000000000122",
+          "kind": "folder",
+          "uploading": false,
+          "size_bytes": 0,
+          "version_number": 0,
+          "object_version_id": null,
+          "name_encrypted": "v1:Zm9sZGVyLW5hbWU.c3Vic2Vjb25k",
+          "folder_digest": "db890c62967d99016e43cbf649ab13075e3d1b6b94d791b9071ed95be0a58795"
+        }
+      ],
+      "digest": "3b8a9be6fe918b9b2f71669e59726b44659a86b1f2b16f2fcb250ecd854818dd"
+    },
+    {
+      "name": "base",
+      "children": [
+        {
+          "id": "f01de000-0000-4000-8000-000000000111",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 2048,
+          "version_number": 2,
+          "object_version_id": "f01de000-0000-4000-8000-000000000911",
+          "name_encrypted": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj+/8=",
+          "folder_digest": null
+        },
+        {
+          "id": "f01de000-0000-4000-8000-000000000112",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 4096,
+          "version_number": 1,
+          "object_version_id": "f01de000-0000-4000-8000-000000000912",
+          "name_encrypted": "v1:9yJ0YWciOiJuYW1lIn0.Qm9vay0yMDI2LnBkZg==",
+          "folder_digest": null
+        }
+      ],
+      "digest": "0bc6a8ced7734c36db333e79db559d1ca3ba6664a0958f2b06320682626f22e5"
+    },
+    {
+      "name": "renamed_child",
+      "children": [
+        {
+          "id": "f01de000-0000-4000-8000-000000000111",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 2048,
+          "version_number": 2,
+          "object_version_id": "f01de000-0000-4000-8000-000000000911",
+          "name_encrypted": "BQUFBQUFBQUFBQUF/+/+aGVsbG8gd29ybGQ=",
+          "folder_digest": null
+        },
+        {
+          "id": "f01de000-0000-4000-8000-000000000112",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 4096,
+          "version_number": 1,
+          "object_version_id": "f01de000-0000-4000-8000-000000000912",
+          "name_encrypted": "v1:9yJ0YWciOiJuYW1lIn0.Qm9vay0yMDI2LnBkZg==",
+          "folder_digest": null
+        }
+      ],
+      "digest": "7f2629cf6db5a14d5b5a84a29fea6c53ac5a527a2a3924b8d6d83d28306bafa5"
+    },
+    {
+      "name": "new_version",
+      "children": [
+        {
+          "id": "f01de000-0000-4000-8000-000000000111",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 2048,
+          "version_number": 3,
+          "object_version_id": "f01de000-0000-4000-8000-000000000911",
+          "name_encrypted": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj+/8=",
+          "folder_digest": null
+        },
+        {
+          "id": "f01de000-0000-4000-8000-000000000112",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 4096,
+          "version_number": 1,
+          "object_version_id": "f01de000-0000-4000-8000-000000000912",
+          "name_encrypted": "v1:9yJ0YWciOiJuYW1lIn0.Qm9vay0yMDI2LnBkZg==",
+          "folder_digest": null
+        }
+      ],
+      "digest": "18e3d93c759e061eccb6ecfe359d76127c133fea8591f1eedebf28eb3694380e"
+    },
+    {
+      "name": "changed_size",
+      "children": [
+        {
+          "id": "f01de000-0000-4000-8000-000000000111",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 2049,
+          "version_number": 2,
+          "object_version_id": "f01de000-0000-4000-8000-000000000911",
+          "name_encrypted": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj+/8=",
+          "folder_digest": null
+        },
+        {
+          "id": "f01de000-0000-4000-8000-000000000112",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 4096,
+          "version_number": 1,
+          "object_version_id": "f01de000-0000-4000-8000-000000000912",
+          "name_encrypted": "v1:9yJ0YWciOiJuYW1lIn0.Qm9vay0yMDI2LnBkZg==",
+          "folder_digest": null
+        }
+      ],
+      "digest": "88bb0d2b17f404ac34c74766582e86e916a49127448a88b1bc6cb5cbca23f69b"
+    },
+    {
+      "name": "changed_object_version_id",
+      "children": [
+        {
+          "id": "f01de000-0000-4000-8000-000000000111",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 2048,
+          "version_number": 2,
+          "object_version_id": "f01de000-0000-4000-8000-0000000009ff",
+          "name_encrypted": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj+/8=",
+          "folder_digest": null
+        },
+        {
+          "id": "f01de000-0000-4000-8000-000000000112",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 4096,
+          "version_number": 1,
+          "object_version_id": "f01de000-0000-4000-8000-000000000912",
+          "name_encrypted": "v1:9yJ0YWciOiJuYW1lIn0.Qm9vay0yMDI2LnBkZg==",
+          "folder_digest": null
+        }
+      ],
+      "digest": "5621eab43a588f29410a7e094a9c502561bf4699be66efb1dcce1d072a5263a9"
+    },
+    {
+      "name": "now_uploading",
+      "children": [
+        {
+          "id": "f01de000-0000-4000-8000-000000000111",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 2048,
+          "version_number": 2,
+          "object_version_id": "f01de000-0000-4000-8000-000000000911",
+          "name_encrypted": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj+/8=",
+          "folder_digest": null
+        },
+        {
+          "id": "f01de000-0000-4000-8000-000000000112",
+          "kind": "file",
+          "uploading": true,
+          "size_bytes": 4096,
+          "version_number": 1,
+          "object_version_id": "f01de000-0000-4000-8000-000000000912",
+          "name_encrypted": "v1:9yJ0YWciOiJuYW1lIn0.Qm9vay0yMDI2LnBkZg==",
+          "folder_digest": null
+        }
+      ],
+      "digest": "1e5352d0dd5c333c2f8e5cdc9c5ca1ffafb05d93bba0d8a95012b454dab4eeee"
+    },
+    {
+      "name": "child_folder_digest_changed",
+      "children": [
+        {
+          "id": "f01de000-0000-4000-8000-000000000111",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 2048,
+          "version_number": 2,
+          "object_version_id": "f01de000-0000-4000-8000-000000000911",
+          "name_encrypted": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj+/8=",
+          "folder_digest": null
+        },
+        {
+          "id": "f01de000-0000-4000-8000-000000000113",
+          "kind": "folder",
+          "uploading": false,
+          "size_bytes": 0,
+          "version_number": 0,
+          "object_version_id": null,
+          "name_encrypted": "v1:Zm9sZGVyLW5hbWU.c3Vic2Vjb25k",
+          "folder_digest": "db890c62967d99016e43cbf649ab13075e3d1b6b94d791b9071ed95be0a58795"
+        }
+      ],
+      "digest": "b242ec76cf6cb5eb897543f86b7166f3c1b77e6df3186be470f0fa9cabaeb740"
+    },
+    {
+      "name": "child_folder_digest_changed_b",
+      "children": [
+        {
+          "id": "f01de000-0000-4000-8000-000000000111",
+          "kind": "file",
+          "uploading": false,
+          "size_bytes": 2048,
+          "version_number": 2,
+          "object_version_id": "f01de000-0000-4000-8000-000000000911",
+          "name_encrypted": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj+/8=",
+          "folder_digest": null
+        },
+        {
+          "id": "f01de000-0000-4000-8000-000000000113",
+          "kind": "folder",
+          "uploading": false,
+          "size_bytes": 0,
+          "version_number": 0,
+          "object_version_id": null,
+          "name_encrypted": "v1:Zm9sZGVyLW5hbWU.c3Vic2Vjb25k",
+          "folder_digest": "0be6816153f69f630366d9a669d0c77beac6fa6dc4540e940ea7d99ea03ab275"
+        }
+      ],
+      "digest": "72848400af0e98f8d0692f9b350cf584ee88d44e2e986daf8153a1a180d0d8cd"
+    }
+  ],
+  "equal": [
+    [
+      "order_a",
+      "order_b"
+    ]
+  ],
+  "distinct": [
+    [
+      "base",
+      "renamed_child",
+      "new_version",
+      "changed_size",
+      "changed_object_version_id",
+      "now_uploading"
+    ],
+    [
+      "child_folder_digest_changed",
+      "child_folder_digest_changed_b"
+    ],
+    [
+      "empty",
+      "one_file",
+      "one_uploading_file",
+      "file_and_subfolder",
+      "base"
+    ]
+  ],
+  "trees": [
+    {
+      "name": "three_levels",
+      "root": {
+        "id": null,
+        "children": [
+          {
+            "id": "f01de000-0000-4000-8000-000000000301",
+            "kind": "file",
+            "uploading": false,
+            "size_bytes": 100,
+            "version_number": 1,
+            "object_version_id": "f01de000-0000-4000-8000-0000000009a1",
+            "name_encrypted": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj+/8=",
+            "folder_digest": null
+          },
+          {
+            "id": "f01de000-0000-4000-8000-000000000310",
+            "kind": "folder",
+            "name_encrypted": "v1:Zm9sZGVyLW5hbWU.c3Vic2Vjb25k",
+            "children": [
+              {
+                "id": "f01de000-0000-4000-8000-000000000311",
+                "kind": "file",
+                "uploading": false,
+                "size_bytes": 200,
+                "version_number": 2,
+                "object_version_id": "f01de000-0000-4000-8000-0000000009a2",
+                "name_encrypted": "v1:9yJ0YWciOiJuYW1lIn0.Qm9vay0yMDI2LnBkZg==",
+                "folder_digest": null
+              },
+              {
+                "id": "f01de000-0000-4000-8000-000000000320",
+                "kind": "folder",
+                "name_encrypted": "BQUFBQUFBQUFBQUF/+/+aGVsbG8gd29ybGQ=",
+                "children": [
+                  {
+                    "id": "f01de000-0000-4000-8000-000000000321",
+                    "kind": "file",
+                    "uploading": false,
+                    "size_bytes": 300,
+                    "version_number": 1,
+                    "object_version_id": "f01de000-0000-4000-8000-0000000009a3",
+                    "name_encrypted": "{\"v\":2,\"n\":\"AAAA\",\"c\":\"8J+QnQ==\"}",
+                    "folder_digest": null
+                  },
+                  {
+                    "id": "f01de000-0000-4000-8000-000000000322",
+                    "kind": "file",
+                    "uploading": true,
+                    "size_bytes": 0,
+                    "version_number": 1,
+                    "object_version_id": null,
+                    "name_encrypted": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj+/8=",
+                    "folder_digest": null
+                  }
+                ]
+              },
+              {
+                "id": "f01de000-0000-4000-8000-000000000330",
+                "kind": "folder",
+                "name_encrypted": "v1:9yJ0YWciOiJuYW1lIn0.Qm9vay0yMDI2LnBkZg==",
+                "children": []
+              }
+            ]
+          },
+          {
+            "id": "f01de000-0000-4000-8000-000000000340",
+            "kind": "folder",
+            "name_encrypted": "{\"v\":2,\"n\":\"AAAA\",\"c\":\"8J+QnQ==\"}",
+            "children": [
+              {
+                "id": "f01de000-0000-4000-8000-000000000341",
+                "kind": "file",
+                "uploading": false,
+                "size_bytes": 400,
+                "version_number": 7,
+                "object_version_id": "f01de000-0000-4000-8000-0000000009a4",
+                "name_encrypted": "BQUFBQUFBQUFBQUF/+/+aGVsbG8gd29ybGQ=",
+                "folder_digest": null
+              }
+            ]
+          }
+        ]
+      },
+      "folder_digests": {
+        "f01de000-0000-4000-8000-000000000320": "d4e7378cb559df9b1d5db823c445fd14707e4551d1485711a2ecf1c0bb092517",
+        "f01de000-0000-4000-8000-000000000330": "db890c62967d99016e43cbf649ab13075e3d1b6b94d791b9071ed95be0a58795",
+        "f01de000-0000-4000-8000-000000000310": "df26d894166a2d86036c0e758b95d099992a2c10c0992a307662355ecec126d0",
+        "f01de000-0000-4000-8000-000000000340": "986035f178e966bafcdae71fd8609c0e46e7710a7491147e72797887b4647221",
+        "root": "819c3c1faddcfee95c95b0108a1aa54d36c3b6fe79ddc4c192238e7cd38ea626"
+      },
+      "root_digest": "819c3c1faddcfee95c95b0108a1aa54d36c3b6fe79ddc4c192238e7cd38ea626"
+    }
+  ]
+}
