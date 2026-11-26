@@ -324,11 +324,16 @@ mod tests {
         );
         assert!(!req.needs_session);
         flow.on_code_sent(ok("{}")).unwrap();
+        // Ceremony order: the master key is confirmed before the password is taken.
+        let words = flow.phrase_words().unwrap();
+        assert_eq!(words.len(), 12);
+        flow.acknowledge_phrase().unwrap();
+        let answers = flow.challenge_positions().unwrap().iter().map(|p| words[*p as usize - 1].clone()).collect();
+        flow.confirm_phrase(answers).unwrap();
         let Err(SignupFlowFfiError::Flow { code, .. }) = flow.set_password("short".into(), "short".into()) else {
             panic!("a short password must be refused")
         };
         assert!(!code.is_empty());
-        assert_eq!(flow.phrase_words().unwrap().len(), 12);
         assert_eq!(signup_policy_request().path, "/api/v1/onboarding");
     }
 

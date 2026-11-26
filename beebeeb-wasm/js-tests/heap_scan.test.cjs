@@ -379,6 +379,14 @@ const reqVector = V.req;
 // One runner per audited export. Each pushes every secret it hands to (or gets
 // back from) the export into `s`.
 // ---------------------------------------------------------------------------
+// Ceremony order: master key first (begin, acknowledge, confirm), then the password.
+function confirmWords(c) {
+  c.beginPhrase();
+  const words = c.phrase().split(' ');
+  c.acknowledgePhrase();
+  c.confirmPhrase(c.challengePositions().map((p) => words[p - 1]));
+}
+
 const CALLS = {
   derive_master_key: (s) => {
     const salt = mk.subarray(0, 16);
@@ -445,35 +453,31 @@ const CALLS = {
   },
   'WasmSignupCeremony.beginPhrase': (s) => {
     const c = new wasm.WasmSignupCeremony(12, false, 4, false, true);
-    c.setPasswordUnchecked(PASSWORD, PASSWORD);
     s.secret('password (in)', PASSWORD);
     attempt(() => c.beginPhrase());
     c.free();
   },
   'WasmSignupCeremony.confirmPhrase': (s) => {
     const c = new wasm.WasmSignupCeremony(12, false, 4, false, true);
-    c.setPasswordUnchecked(PASSWORD, PASSWORD);
     c.beginPhrase();
+    const words = c.phrase().split(' ');
+    c.acknowledgePhrase();
     s.secret('phrase (in)', phraseBytes);
-    attempt(() => {
-      const words = mnemonic.split(' ');
-      const positions = c.challengePositions();
-      c.confirmPhrase(positions.map((p) => words[p]));
-    });
+    attempt(() => c.confirmPhrase(c.challengePositions().map((p) => words[p - 1])));
     c.free();
   },
   'WasmSignupCeremony.startRegistration': (s) => {
     const c = new wasm.WasmSignupCeremony(12, false, 4, false, true);
+    confirmWords(c);
     c.setPasswordUnchecked(PASSWORD, PASSWORD);
-    c.beginPhrase();
     s.secret('password (in)', PASSWORD);
     attempt(() => c.startRegistration());
     attempt(() => c.free());
   },
   'WasmSignupCeremony.finishRegistration': (s) => {
     const c = new wasm.WasmSignupCeremony(12, false, 4, false, true);
+    confirmWords(c);
     c.setPasswordUnchecked(PASSWORD, PASSWORD);
-    c.beginPhrase();
     s.secret('password (in)', PASSWORD);
     attempt(() => c.startRegistration());
     attempt(() => c.finishRegistration(new Uint8Array(96)));
@@ -906,6 +910,7 @@ test('heap scan: no raw secret bytes in the WASM heap after an export returns', 
   // and the scanner MUST find its tail. Used nowhere else in this file.
   const controlPassword = 'control-password-2254-ß';
   const ceremony = new wasm.WasmSignupCeremony(8, false, 12, false, true);
+  confirmWords(ceremony);
   ceremony.setPasswordUnchecked(controlPassword, controlPassword);
   const liveScan = scan([{ label: 'control password (live)', bytes: Buffer.from(controlPassword, 'utf8') }]);
   ceremony.free();
