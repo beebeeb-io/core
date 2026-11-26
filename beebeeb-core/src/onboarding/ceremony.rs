@@ -384,6 +384,28 @@ impl SignupCeremony {
         Ok(())
     }
 
+    /// Take an existing recovery phrase (for example the one of an offline Pass vault) instead
+    /// of generating one. The phrase is normalized and checked (an invalid phrase gives
+    /// `Crypto(InvalidRecoveryPhrase)`); the person typed all the words, so it counts as
+    /// acknowledged and confirmed, and the phrase string is wiped. A later
+    /// [`begin_phrase`](Self::begin_phrase) is a no-op. Refused once the phrase is confirmed
+    /// or registration has started.
+    pub fn adopt_phrase(&mut self, phrase: &str) -> Result<(), CeremonyError> {
+        if self.done || self.phrase_confirmed || !matches!(self.registration, Registration::NotStarted) {
+            return Err(CeremonyError::InvalidState {
+                action: "adopt a recovery phrase",
+                reason: "the phrase is already confirmed or registration has started",
+            });
+        }
+        let normalized = recovery::normalize_phrase(phrase);
+        let master_key = recovery::recover_from_phrase(&normalized)?;
+        self.install_phrase(normalized, master_key);
+        self.phrase_acknowledged = true;
+        self.phrase_confirmed = true;
+        self.phrase = None; // Zeroizing wipes on drop
+        Ok(())
+    }
+
     fn install_phrase(&mut self, phrase: Zeroizing<String>, master_key: MasterKey) {
         let word_count = phrase.split_whitespace().count();
         let wanted = (self.config.verify_word_count.max(VERIFY_WORD_COUNT_FLOOR) as usize).min(word_count);

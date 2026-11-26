@@ -263,3 +263,53 @@ fn the_terms_url_host_is_parsed_and_compared_exactly() {
         Some("https://app.beebeeb.io/legal?v=2")
     );
 }
+
+#[test]
+fn adopted_phrase_registers_with_the_keys_that_phrase_gives() {
+    let (phrase, _) = crate::recovery::generate_recovery_phrase().unwrap();
+    let want = crate::recovery::recover_from_phrase(&phrase).unwrap();
+    let setup = opaque_protocol::create_server_setup();
+    let mut f = to_password(false);
+    f.adopt_phrase(&phrase).unwrap();
+    let req = f.register_start().unwrap();
+    let body = req.body.unwrap();
+    let msg = b64().decode(body["client_message"].as_str().unwrap()).unwrap();
+    let sm = opaque_protocol::server_registration_start(&setup, &msg, b"anna@example.eu").unwrap();
+    let req = f
+        .on_register_start(&ok(json!({ "server_message": b64().encode(sm) })))
+        .unwrap();
+    let body = req.body.unwrap();
+    let check = b64().decode(body["recovery_check"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        check.as_slice(),
+        crate::opaque::compute_recovery_check(&want).as_slice()
+    );
+    let created = f
+        .on_register_finish(&ok(json!({ "user_id": "u1", "session_token": "s1" })))
+        .unwrap();
+    assert_eq!(created.master_key.as_bytes(), want.as_bytes());
+}
+
+#[test]
+fn adopt_accepts_capitals_newline_and_nbsp() {
+    let (phrase, _) = crate::recovery::generate_recovery_phrase().unwrap();
+    let messy = phrase.to_uppercase().replacen(' ', "\n", 1).replacen(' ', "\u{a0}", 1);
+    to_password(false).adopt_phrase(&messy).unwrap();
+}
+
+#[test]
+fn adopt_refuses_a_bad_checksum() {
+    let bad = ["abandon"; 12].join(" ");
+    assert!(matches!(
+        to_password(false).adopt_phrase(&bad),
+        Err(SignupError::InvalidPhrase)
+    ));
+}
+
+#[test]
+fn adopt_after_confirm_is_refused() {
+    let (phrase, _) = crate::recovery::generate_recovery_phrase().unwrap();
+    let mut f = to_password(false);
+    confirm(&mut f);
+    assert!(matches!(f.adopt_phrase(&phrase), Err(SignupError::WrongState)));
+}

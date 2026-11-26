@@ -27,6 +27,7 @@ use zeroize::Zeroizing;
 
 use crate::auth_flow::sign_in::{can_submit, canonical_email};
 use crate::auth_flow::{HttpRequest, HttpResponse, RequestAuth, b64, b64_decode};
+use crate::error::CoreError;
 use crate::kdf::MasterKey;
 use crate::onboarding::{
     BreachCheck, BreachPolicy, BreachResponse, BreachVerdict, CeremonyConfig, CeremonyError, PasswordEvaluation,
@@ -493,6 +494,15 @@ impl SignupFlow {
             .split_whitespace()
             .map(|w| Zeroizing::new(w.to_owned()))
             .collect())
+    }
+
+    /// Take an existing recovery phrase (an offline Pass vault's) instead of a new one. Counts as
+    /// confirmed; `InvalidPhrase` for anything but 12 valid words.
+    pub fn adopt_phrase(&mut self, phrase: &str) -> Result<(), SignupError> {
+        self.ceremony.adopt_phrase(phrase).map_err(|e| match e {
+            CeremonyError::Crypto(CoreError::InvalidRecoveryPhrase) => SignupError::InvalidPhrase,
+            e => e.into(),
+        })
     }
 
     pub fn acknowledge_phrase(&mut self) -> Result<(), SignupError> {
