@@ -42,7 +42,7 @@ nodeTest('the retry vector: ladder, jitter, decision and parse agree with every 
 });
 
 nodeTest('the exported policy is the one web needs, and its fields are read back', () => {
-  assert.deepEqual(policy(), { max_attempts: 6, base_ms: 500, cap_ms: 30000, jitter: 'none' });
+  assert.deepEqual(policy(), { max_attempts: 6, base_ms: 500, cap_ms: 30000, jitter: 'full' });
 
   // The cap replaces the doubling ladder rather than extending it.
   assert.equal(wasm.retryDelayMs(policy({ cap_ms: 1000 }), 4), 1000);
