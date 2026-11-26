@@ -716,15 +716,15 @@ pub fn resolve_request_row(
         wrapped_content_key,
     ) {
         Ok(content) => (content, RequestSeal::Bound),
-        Err(CoreError::Decryption) => match crate::file_request::open_request_upload(
-            &request_private,
-            sender_ephemeral_pubkey,
-            b"",
-            wrapped_content_key,
-        ) {
-            Ok(content) => (content, RequestSeal::Unbound),
-            Err(err) => return Err(err),
-        },
+        Err(CoreError::Decryption) => (
+            crate::file_request::open_request_upload(
+                &request_private,
+                sender_ephemeral_pubkey,
+                b"",
+                wrapped_content_key,
+            )?,
+            RequestSeal::Unbound,
+        ),
         Err(err) => return Err(err),
     };
     let content_key = FileKey::from_bytes(*content);

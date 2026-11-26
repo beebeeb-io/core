@@ -23,6 +23,17 @@ done
 
 must_exist beebeeb-core/src/key_proof.rs 'KeyProofVerifier'
 
+# docs/folder-digest.md and EXPORTS.md name these.
+for symbol in \
+  'ALGORITHM' 'DIGEST_CONTEXT' 'NAME_HASH_CONTEXT' 'RECORD_LEN' 'pub type Digest' 'pub const EMPTY' \
+  'ChildKind' 'ChildRecord' 'pub fn name_hash' 'pub fn encode_record' 'pub fn folder_digest' \
+  'pub fn to_hex' 'pub fn from_hex'; do
+  must_exist beebeeb-core/src/folder_digest.rs "$symbol"
+done
+for symbol in 'FolderDigestPage' 'FolderDigestChild'; do
+  must_exist beebeeb-types/src/folder_digest.rs "$symbol"
+done
+
 for symbol in \
   'METADATA_SEAL_WRITE' 'MetadataSeal::Subkey' 'decrypt_file_metadata' \
   'decrypt_file_metadata_with_key' 'decrypt_name_metadata' 'decrypt_thumbnail' \

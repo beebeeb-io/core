@@ -26,12 +26,12 @@ use serde_json::json;
 use zeroize::Zeroizing;
 
 use crate::auth_flow::sign_in::{can_submit, canonical_email};
-use crate::auth_flow::{b64, b64_decode, HttpRequest, HttpResponse, RequestAuth};
+use crate::auth_flow::{HttpRequest, HttpResponse, RequestAuth, b64, b64_decode};
 use crate::error::CoreError;
 use crate::kdf::MasterKey;
 use crate::onboarding::{
-    evaluate_password, BreachCheck, BreachPolicy, BreachResponse, BreachVerdict, CeremonyConfig, CeremonyError,
-    PasswordEvaluation, PasswordPolicy, SignupCeremony,
+    BreachCheck, BreachPolicy, BreachResponse, BreachVerdict, CeremonyConfig, CeremonyError, PasswordEvaluation,
+    PasswordPolicy, SignupCeremony, evaluate_password,
 };
 
 pub const ONBOARDING_PATH: &str = "/api/v1/onboarding";

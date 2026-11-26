@@ -59,9 +59,9 @@ use thiserror::Error;
 use zeroize::Zeroizing;
 
 use super::breach::{BreachCheck, BreachVerdict};
-use super::password::{evaluate_password, PasswordEvaluation, PasswordPolicy};
-use crate::kdf::MasterKey;
+use super::password::{PasswordEvaluation, PasswordPolicy, evaluate_password};
 use crate::CoreError;
+use crate::kdf::MasterKey;
 use crate::{opaque, opaque_protocol, recovery};
 
 /// Floor for the number of words the user must type back, regardless of what

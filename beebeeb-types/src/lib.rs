@@ -31,6 +31,7 @@ pub mod backup;
 pub mod chunk;
 pub mod crypto;
 pub mod file;
+pub mod folder_digest;
 pub mod format;
 pub mod limits;
 pub mod quota;

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `SignupCeremony::adopt_phrase` / `SignupFlow::adopt_phrase` (wasm `adoptPhrase`, uniffi `adopt_phrase`): sign-up takes an existing recovery phrase instead of generating one.
+- `beebeeb_core::folder_digest` and `beebeeb_types::folder_digest` (spec `docs/folder-digest.md`): folder digest v1, a BLAKE3 Merkle digest per folder over ids, sizes, versions, object version ids, name ciphertext hashes and child folder digests, its `GET /api/v1/folder-digests` wire types, and vectors in `test-vectors/folder_digest_v1.json`. `beebeeb-types` now depends on `uuid` (already in the lockfile).
 - `beebeeb_core::local_seal` (design note `docs/superpowers/specs/2026-11-18-local-snapshot-and-scratch-seal.md`):
   the recovery snapshot of an unsaved document (`seal_recovery_snapshot`, `open_recovery_snapshot`,
   `peek_snapshot_meta`; AES-256-GCM under a key from the account key and the file id, bound to the file id,
