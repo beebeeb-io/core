@@ -797,7 +797,11 @@ mod tests {
         c.confirm_phrase(&a).unwrap();
         c.set_password(GOOD_PW, GOOD_PW, None).unwrap();
         c.begin_phrase().unwrap();
-        assert_eq!(c.step(), CeremonyStep::CreateAccount, "begin_phrase after confirming changes nothing");
+        assert_eq!(
+            c.step(),
+            CeremonyStep::CreateAccount,
+            "begin_phrase after confirming changes nothing"
+        );
     }
 
     #[test]

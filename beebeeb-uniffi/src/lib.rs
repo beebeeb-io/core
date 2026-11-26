@@ -4714,7 +4714,11 @@ impl From<onb::CeremonyStep> for CeremonyStepDto {
 /// The canonical order of the pre-account ceremony: master key first, then the password.
 #[uniffi::export]
 pub fn ceremony_step_order() -> Vec<CeremonyStepDto> {
-    onb::PRE_ACCOUNT_CEREMONY_ORDER.iter().copied().map(Into::into).collect()
+    onb::PRE_ACCOUNT_CEREMONY_ORDER
+        .iter()
+        .copied()
+        .map(Into::into)
+        .collect()
 }
 
 /// The server step id a ceremony step belongs to (`save_recovery_phrase` for
@@ -6094,7 +6098,10 @@ mod onboarding_binding_tests {
             c.set_password(GOOD_PW.into(), "other".into(), None),
             Err(OnboardingError::PasswordMismatch)
         ));
-        assert!(matches!(c.phrase(), Err(OnboardingError::PhraseUnavailable)), "wiped once confirmed");
+        assert!(
+            matches!(c.phrase(), Err(OnboardingError::PhraseUnavailable)),
+            "wiped once confirmed"
+        );
         assert_eq!(
             ceremony_step_spec_id(CeremonyStepDto::ConfirmPhrase),
             "save_recovery_phrase"
