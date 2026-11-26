@@ -382,7 +382,7 @@ const reqVector = V.req;
 // Ceremony order: master key first (begin, acknowledge, confirm), then the password.
 function confirmWords(c) {
   c.beginPhrase();
-  const words = c.phrase().split(' ');
+  const words = c.phrase().trim().split(/\s+/);
   c.acknowledgePhrase();
   c.confirmPhrase(c.challengePositions().map((p) => words[p - 1]));
 }
@@ -460,7 +460,7 @@ const CALLS = {
   'WasmSignupCeremony.confirmPhrase': (s) => {
     const c = new wasm.WasmSignupCeremony(12, false, 4, false, true);
     c.beginPhrase();
-    const words = c.phrase().split(' ');
+    const words = c.phrase().trim().split(/\s+/);
     c.acknowledgePhrase();
     s.secret('phrase (in)', phraseBytes);
     attempt(() => c.confirmPhrase(c.challengePositions().map((p) => words[p - 1])));
