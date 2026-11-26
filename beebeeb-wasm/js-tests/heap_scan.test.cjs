@@ -384,7 +384,7 @@ function confirmWords(c) {
   c.beginPhrase();
   const words = c.phrase().trim().split(/\s+/);
   c.acknowledgePhrase();
-  c.confirmPhrase(c.challengePositions().map((p) => words[p - 1]));
+  c.confirmPhrase(Array.from(c.challengePositions(), (p) => words[p - 1]));
 }
 
 const CALLS = {
@@ -463,7 +463,7 @@ const CALLS = {
     const words = c.phrase().trim().split(/\s+/);
     c.acknowledgePhrase();
     s.secret('phrase (in)', phraseBytes);
-    attempt(() => c.confirmPhrase(c.challengePositions().map((p) => words[p - 1])));
+    attempt(() => c.confirmPhrase(Array.from(c.challengePositions(), (p) => words[p - 1])));
     c.free();
   },
   'WasmSignupCeremony.startRegistration': (s) => {
