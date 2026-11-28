@@ -646,6 +646,8 @@ mod tests {
         assert_eq!(outcome, UploadOutcome::Failed(UploadFailureState::SessionExpired));
     }
 
+    // A 429 with `Retry-After: 1` waits on core's doubling floor (2, 4, 8, 16, 32 s), not 1 s.
+    // `ScriptedIo::sleep` is virtual, so the test does not sleep for real.
     #[tokio::test]
     async fn retry_after_is_bounded_and_the_item_eventually_becomes_failed() {
         let io = ScriptedIo::new(|request, _, _| match request {

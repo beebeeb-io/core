@@ -3,7 +3,7 @@
 //! The policy is a plain object (`retryPolicy()` returns core's default) so a
 //! web caller can keep it, override a field, then ask core for the delay or the
 //! decision. No rule lives here: the ladder, the jitter bounds, the retryable
-//! outcomes and `Retry-After` are core's, proved by
+//! outcomes, `Retry-After` and the wait after a 429 are core's, proved by
 //! `test-vectors/consolidation/retry.json`.
 use beebeeb_core::retry::{self, Jitter, RetryOutcome, RetryPolicy};
 use serde::{Deserialize, Serialize};
@@ -81,9 +81,10 @@ pub fn retry_jittered_delay_ms(policy: JsValue, retry: u32, sample_permille: u32
 }
 
 /// The decision after `attempts_made` attempts: the delay in milliseconds to
-/// wait before the next attempt, or `null` to surface the last error. A server
-/// `Retry-After` (`retry_after_seconds`, a number of seconds or `null`)
-/// replaces the ladder exactly.
+/// wait before the next attempt, or `null` to surface the last error. A 429
+/// waits `rateLimitWaitMs(attempts_made - 1, retry_after_seconds, 0)`. For any
+/// other outcome a server `Retry-After` (`retry_after_seconds`, a number of
+/// seconds or `null`) replaces the ladder exactly.
 ///
 /// `outcome` is `"success"`, `"network"`, `"fatal"`, or `{ status: 503 }`.
 #[wasm_bindgen(js_name = retryDecide)]
@@ -100,6 +101,18 @@ pub fn retry_decide(
         Some(delay) => JsValue::from_f64(delay as f64),
         None => JsValue::NULL,
     })
+}
+
+/// How long a client pauses after a 429, in milliseconds. `streak` is the
+/// number of 429s in a row before this one (0 for the first). The base is the
+/// larger of a 2 s floor that doubles per streak (capped at 60 s) and the
+/// server's `retry_after_seconds` (a number of seconds or `null`, capped at
+/// 300 s); `jitter_permille` (`0..=1000`; larger values are clamped) adds
+/// 0-25 % on top.
+#[wasm_bindgen(js_name = rateLimitWaitMs)]
+pub fn rate_limit_wait_ms(streak: u32, retry_after_seconds: JsValue, jitter_permille: u32) -> Result<f64, JsError> {
+    let retry_after = retry_after_from_js(&retry_after_seconds)?;
+    Ok(retry::rate_limit_wait_ms(streak, retry_after, jitter_permille) as f64)
 }
 
 /// Parse a `Retry-After` delta-seconds header: the number of seconds, or `null`

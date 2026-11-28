@@ -847,3 +847,11 @@ pins this release).
   `ArchiveEntryDto` record goes with them), **added: 24** (the archive service: `nativeclienthandle_archives`,
   eight `archiveservicehandle_*` methods and `archiveeventstreamhandle_next`, each with its checksum,
   plus the two objects' `clone` / `free`).
+
+## Rate-limit wait export (rate-limit-backoff)
+
+Additive: removed 0, changed 0 signatures. `retryDecide` keeps its signature; its 429 delay now comes from this rule.
+
+| WASM | Rust | Meaning |
+|---|---|---|
+| `rateLimitWaitMs(streak, retryAfterSeconds \| null, jitterPermille)` | `beebeeb_core::retry::rate_limit_wait_ms` | The client pause after a 429 in ms: a 2 s floor doubling per 429 in a row (cap 60 s), a longer `Retry-After` winning (cap 300 s), plus 0-25 % jitter from the permille sample. |

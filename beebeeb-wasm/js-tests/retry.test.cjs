@@ -2,7 +2,7 @@
 // C3 move 6's WASM surface: the one retry policy. Every case in
 // test-vectors/consolidation/retry.json goes through a wasm export — the
 // ladder, deterministic full jitter, the per-outcome decision, the budget
-// boundary and the Retry-After parser.
+// boundary, the Retry-After parser and the client wait after a 429.
 // BB_VECTOR_PATH points the same test at a mutated copy for the red run.
 const assert = require('node:assert/strict');
 const nodeTest = require('node:test');
@@ -16,8 +16,8 @@ const policy = (over = {}) => ({ ...wasm.retryPolicy(), ...over });
 // A decision or a parsed header is a number or `null`.
 const ms = (value) => (value === null || value === undefined ? null : value);
 
-nodeTest('the retry vector: ladder, jitter, decision and parse agree with every case', () => {
-  assert.equal(vectors.cases.length, 30, 'every case in retry.json is exercised');
+nodeTest('the retry vector: ladder, jitter, decision, parse and 429 wait agree with every case', () => {
+  assert.equal(vectors.cases.length, 46, 'every case in retry.json is exercised');
 
   for (const c of vectors.cases) {
     let got;
@@ -34,6 +34,9 @@ nodeTest('the retry vector: ladder, jitter, decision and parse agree with every 
     } else if (c.kind === 'parse') {
       got = ms(wasm.parseRetryAfter(c.value));
       expected = c.expected_seconds;
+    } else if (c.kind === 'rate_limit_wait') {
+      got = wasm.rateLimitWaitMs(c.streak, c.retry_after_seconds, c.jitter_permille);
+      expected = c.expected_ms;
     } else {
       assert.fail(`${c.id}: unknown vector kind ${c.kind}`);
     }
@@ -49,7 +52,11 @@ nodeTest('the exported policy is the one web needs, and its fields are read back
   // A shorter budget stops the decision at its own boundary.
   assert.equal(ms(wasm.retryDecide(policy({ max_attempts: 2 }), 2, { status: 503 }, null)), null);
   assert.equal(ms(wasm.retryDecide(policy({ max_attempts: 2 }), 1, { status: 503 }, null)), 500);
-  // A stated Retry-After wins over the ladder, including on a 429.
+  // A stated Retry-After wins over the ladder on a 5xx.
+  assert.equal(ms(wasm.retryDecide(null, 1, { status: 503 }, 12)), 12000);
+  // A 429 waits on the doubling floor unless the server asks for longer.
+  assert.equal(ms(wasm.retryDecide(null, 1, { status: 429 }, 1)), 2000);
+  assert.equal(ms(wasm.retryDecide(null, 3, { status: 429 }, null)), 8000);
   assert.equal(ms(wasm.retryDecide(null, 1, { status: 429 }, 12)), 12000);
   // An unknown jitter is refused instead of silently defaulting.
   assert.throws(() => wasm.retryDelayMs(policy({ jitter: 'partial' }), 1), /unknown retry jitter/);

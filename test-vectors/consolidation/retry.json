@@ -1,5 +1,5 @@
 {
-  "description": "Move 6 — one backoff policy: the exponential ladder (500 ms base, 30 s cap, six total attempts), deterministic full jitter, which outcomes retry (429 and 5xx and network only), Retry-After honouring, and the exhaustion boundary. The module is pure — it returns a delay, the transport sleeps.",
+  "description": "Move 6 — one backoff policy: the exponential ladder (500 ms base, 30 s cap, six total attempts), deterministic full jitter, which outcomes retry (429 and 5xx and network only), Retry-After honouring, the exhaustion boundary, and the client wait after a 429 (a 2 s floor that doubles per 429 in a row up to 60 s, a longer Retry-After winning up to 300 s, plus 0-25 % jitter). The module is pure — it returns a delay, the transport sleeps.",
   "source": "beebeeb-upload/src/retry.rs with_retry (5 retries, 500 ms base, 30 s cap, Retry-After wins) generalised into core; the CLI (200 ms → 5 s), desktop (429-only, x-ratelimit-reset) and web (429-only, short-window ceiling) policies stay local per the map §4.2 case 7",
   "cases": [
     {
@@ -108,7 +108,7 @@
         "status": 429
       },
       "retry_after_seconds": null,
-      "expected_ms": 500
+      "expected_ms": 2000
     },
     {
       "id": "retry_5xx",
@@ -221,6 +221,134 @@
       "kind": "parse",
       "value": "Wed, 21 Oct 2015 07:28:00 GMT",
       "expected_seconds": null
+    },
+    {
+      "id": "rate_limit_wait_streak_0",
+      "kind": "rate_limit_wait",
+      "streak": 0,
+      "retry_after_seconds": null,
+      "jitter_permille": 0,
+      "expected_ms": 2000
+    },
+    {
+      "id": "rate_limit_wait_streak_1",
+      "kind": "rate_limit_wait",
+      "streak": 1,
+      "retry_after_seconds": null,
+      "jitter_permille": 0,
+      "expected_ms": 4000
+    },
+    {
+      "id": "rate_limit_wait_streak_2",
+      "kind": "rate_limit_wait",
+      "streak": 2,
+      "retry_after_seconds": null,
+      "jitter_permille": 0,
+      "expected_ms": 8000
+    },
+    {
+      "id": "rate_limit_wait_streak_3",
+      "kind": "rate_limit_wait",
+      "streak": 3,
+      "retry_after_seconds": null,
+      "jitter_permille": 0,
+      "expected_ms": 16000
+    },
+    {
+      "id": "rate_limit_wait_streak_4",
+      "kind": "rate_limit_wait",
+      "streak": 4,
+      "retry_after_seconds": null,
+      "jitter_permille": 0,
+      "expected_ms": 32000
+    },
+    {
+      "id": "rate_limit_wait_streak_5",
+      "kind": "rate_limit_wait",
+      "streak": 5,
+      "retry_after_seconds": null,
+      "jitter_permille": 0,
+      "expected_ms": 60000
+    },
+    {
+      "id": "rate_limit_wait_streak_6",
+      "kind": "rate_limit_wait",
+      "streak": 6,
+      "retry_after_seconds": null,
+      "jitter_permille": 0,
+      "expected_ms": 60000
+    },
+    {
+      "id": "rate_limit_wait_hint_1",
+      "kind": "rate_limit_wait",
+      "streak": 0,
+      "retry_after_seconds": 1,
+      "jitter_permille": 0,
+      "expected_ms": 2000
+    },
+    {
+      "id": "rate_limit_wait_hint_5",
+      "kind": "rate_limit_wait",
+      "streak": 0,
+      "retry_after_seconds": 5,
+      "jitter_permille": 0,
+      "expected_ms": 5000
+    },
+    {
+      "id": "rate_limit_wait_hint_60",
+      "kind": "rate_limit_wait",
+      "streak": 0,
+      "retry_after_seconds": 60,
+      "jitter_permille": 0,
+      "expected_ms": 60000
+    },
+    {
+      "id": "rate_limit_wait_hint_400",
+      "kind": "rate_limit_wait",
+      "streak": 0,
+      "retry_after_seconds": 400,
+      "jitter_permille": 0,
+      "expected_ms": 300000
+    },
+    {
+      "id": "rate_limit_wait_jitter_0",
+      "kind": "rate_limit_wait",
+      "streak": 0,
+      "retry_after_seconds": null,
+      "jitter_permille": 0,
+      "expected_ms": 2000
+    },
+    {
+      "id": "rate_limit_wait_jitter_500",
+      "kind": "rate_limit_wait",
+      "streak": 0,
+      "retry_after_seconds": null,
+      "jitter_permille": 500,
+      "expected_ms": 2250
+    },
+    {
+      "id": "rate_limit_wait_jitter_1000",
+      "kind": "rate_limit_wait",
+      "streak": 0,
+      "retry_after_seconds": null,
+      "jitter_permille": 1000,
+      "expected_ms": 2500
+    },
+    {
+      "id": "rate_limit_wait_hint_60_jitter_1000",
+      "kind": "rate_limit_wait",
+      "streak": 0,
+      "retry_after_seconds": 60,
+      "jitter_permille": 1000,
+      "expected_ms": 75000
+    },
+    {
+      "id": "rate_limit_wait_streak_2_hint_5_jitter_500",
+      "kind": "rate_limit_wait",
+      "streak": 2,
+      "retry_after_seconds": 5,
+      "jitter_permille": 500,
+      "expected_ms": 9000
     }
   ]
 }
