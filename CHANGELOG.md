@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   locks and the vault level is unchanged. Turning it off needs a screen proof given for that change.
   Breaking for code that builds `StartFacts` by hand: it has a fourth field.
 
+- `beebeeb_core::retry::rate_limit_wait_ms` (wasm `rateLimitWaitMs`) with `RATE_LIMIT_WAIT_FLOOR_MS` and `RATE_LIMIT_WAIT_CAP_MS`: the one client wait after a 429 (a 2 s floor doubling per 429 in a row up to 60 s, a longer `Retry-After` winning, plus 0-25 % jitter). `RetryPolicy::decide` now uses it un-jittered on a 429, so a 429 without a hint waits 2 s instead of 500 ms; vectors are the `rate_limit_wait` cases in `test-vectors/consolidation/retry.json`.
+
 ### Changed
 
 - A wrong password typed as the proof for `set_app_lock` or `set_ask_password_at_start` is now

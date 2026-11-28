@@ -3,7 +3,7 @@
 //! Cases live in `test-vectors/consolidation/retry.json`; this runner executes
 //! them against `beebeeb_core::retry`. The module is pure: no clock, no sleep.
 
-use beebeeb_core::retry::{Jitter, RetryOutcome, RetryPolicy, parse_retry_after};
+use beebeeb_core::retry::{Jitter, RetryOutcome, RetryPolicy, parse_retry_after, rate_limit_wait_ms};
 use serde_json::Value;
 
 pub const CONCEPT: &str = "retry";
@@ -36,6 +36,7 @@ fn retry_cases_match_core() {
     let mut jitter = 0;
     let mut decisions = 0;
     let mut parsed = 0;
+    let mut rate_limit_waits = 0;
 
     for case in &cases {
         let id = case["id"].as_str().expect("case id");
@@ -73,6 +74,18 @@ fn retry_cases_match_core() {
                 let expected = case["expected_seconds"].as_u64();
                 assert_eq!(parse_retry_after(value), expected, "{id}: Retry-After");
             }
+            "rate_limit_wait" => {
+                rate_limit_waits += 1;
+                let streak = case["streak"].as_u64().expect("streak") as u32;
+                let retry_after = case["retry_after_seconds"].as_u64();
+                let sample = case["jitter_permille"].as_u64().expect("jitter_permille") as u32;
+                let expected = case["expected_ms"].as_u64().expect("expected_ms");
+                assert_eq!(
+                    rate_limit_wait_ms(streak, retry_after, sample),
+                    expected,
+                    "{id}: 429 wait"
+                );
+            }
             other => panic!("{id}: unknown case kind `{other}`"),
         }
     }
@@ -81,6 +94,7 @@ fn retry_cases_match_core() {
     assert_eq!(jitter, 5, "the jitter cases");
     assert_eq!(decisions, 9, "the decision cases");
     assert_eq!(parsed, 8, "the Retry-After cases");
+    assert_eq!(rate_limit_waits, 16, "the 429 wait cases");
     for required in [
         "retry_429_with_retry_after",
         "retry_429_without_retry_after",
@@ -88,6 +102,10 @@ fn retry_cases_match_core() {
         "retry_network_error",
         "retry_budget_exhausted",
         "retry_jitter_bounds_full",
+        "rate_limit_wait_streak_0",
+        "rate_limit_wait_streak_6",
+        "rate_limit_wait_hint_400",
+        "rate_limit_wait_jitter_1000",
     ] {
         assert!(
             cases.iter().any(|case| case["id"] == required),
