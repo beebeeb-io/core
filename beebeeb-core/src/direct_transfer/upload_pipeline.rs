@@ -10,9 +10,6 @@ pub const UPLOAD_FILE_CONCURRENCY_DEFAULT: u32 = 4;
 pub const UPLOAD_FILE_CONCURRENCY_MAX: u32 = 8;
 /// Files finishing commits and complete after releasing their PUT lane.
 pub const UPLOAD_TAIL_FILES_MAX: u32 = 4;
-/// The process-wide upload API pacer, on both transports.
-pub const UPLOAD_API_REQUESTS_PER_SECOND_MAX: u32 = 60;
-pub const UPLOAD_API_BURST: u32 = 20;
 
 pub fn commit_slots(chunk_size_bytes: u64) -> u32 {
     if chunk_size_bytes < UPLOAD_COMMIT_SLOTS_SMALL_BELOW {
@@ -725,11 +722,6 @@ mod tests {
             ),
             ("UPLOAD_FILE_CONCURRENCY_MAX", u64::from(UPLOAD_FILE_CONCURRENCY_MAX)),
             ("UPLOAD_TAIL_FILES_MAX", u64::from(UPLOAD_TAIL_FILES_MAX)),
-            (
-                "UPLOAD_API_REQUESTS_PER_SECOND_MAX",
-                u64::from(UPLOAD_API_REQUESTS_PER_SECOND_MAX),
-            ),
-            ("UPLOAD_API_BURST", u64::from(UPLOAD_API_BURST)),
         ];
         assert_eq!(c.len(), actual.len());
         for (name, value) in actual {

@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Removed the unused `direct_transfer` upload pacer constants `UPLOAD_API_REQUESTS_PER_SECOND_MAX` and `UPLOAD_API_BURST` (no client read them), with their entries in `test-vectors/direct_upload_pipeline.json`.
 - A wrong password typed as the proof for `set_app_lock` or `set_ask_password_at_start` is now
   `AuthError::PasswordWrong { wait_ms, local_check_off }` (was `PasswordNotConfirmed`), so a host can
   show the wait and that offline unlock is off after the tenth wrong try, as the screen unlock does.
